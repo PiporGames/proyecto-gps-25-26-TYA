@@ -23,7 +23,7 @@ from typing import Dict, Any, Optional
 # CONFIGURACIÓN DEL SERVIDOR Y AUTENTICACIÓN
 # ============================================================================
 BASE_URL = "http://localhost:8081"
-AUTH_TOKEN = "07186e0e6e5a5691ba38fed320687429c98d965359762980a43472b51cf1cbd7e290f2bc16ec2bac8515a952881095ad20b654527a6e9d924f9bb123f2c164d0"  # ⚠️ REEMPLAZAR con un token válido de autenticación
+AUTH_TOKEN = "cbd7bd346f747173e330817726756422b77b52c569c1d393a7b1b2271150058b990dc356814175a31565e5d334e2e74286c73a986b74070f912b00630c706a3e"  # ⚠️ REEMPLAZAR con un token válido de autenticación
 
 # Colores para output en consola
 class Colors:
@@ -198,6 +198,121 @@ def test_get_genres():
 # PRUEBAS DE SONGS (Canciones)
 # =============================================================================
 
+def test_list_songs():
+    """Prueba obtener lista de canciones por IDs"""
+    print_test_header("GET /song/list - Obtener lista de canciones por IDs")
+    
+    # Primero crear algunas canciones para tener IDs válidos
+    song_ids = []
+    for i in range(3):
+        song_data = {
+            "title": f"List Test Song {i+1}",
+            "genres": [1],
+            "cover": "data:image/png;base64,test",
+            "price": 5.99,
+            "trackId": 700001 + i,
+            "duration": 180
+        }
+        success, response = make_request("POST", "/song/upload", song_data, 200)
+        if success and response:
+            try:
+                song_id = response.json().get("songId")
+                song_ids.append(song_id)
+            except:
+                pass
+    
+    if len(song_ids) > 0:
+        # Probar el endpoint list
+        ids_param = ",".join(map(str, song_ids))
+        success, response = make_request("GET", f"/song/list?ids={ids_param}", expected_status=200, requires_auth=False)
+        
+        if success and response:
+            try:
+                songs = response.json()
+                print_result(len(songs) == len(song_ids), f"Recibidas {len(songs)} canciones de {len(song_ids)} solicitadas")
+                
+                # Verificar estructura
+                if len(songs) > 0:
+                    first_song = songs[0]
+                    required_fields = ['songId', 'title', 'price', 'duration', 'genres', 'cover']
+                    has_all_fields = all(field in first_song for field in required_fields)
+                    print_result(has_all_fields, f"Estructura de datos completa")
+            except Exception as e:
+                print_result(False, f"Error al parsear respuesta: {e}")
+        else:
+            print_result(False, f"Error al obtener lista - Status: {response.status_code if response else 'N/A'}")
+        
+        # Limpiar
+        for song_id in song_ids:
+            make_request("DELETE", f"/song/{song_id}")
+    else:
+        print_result(False, "No se pudieron crear canciones para la prueba")
+
+def test_list_songs_invalid_id():
+    """Prueba list con ID inválido"""
+    print_test_header("GET /song/list - Validación de ID inválido")
+    
+    success, response = make_request("GET", "/song/list?ids=1,abc,3", expected_status=400, requires_auth=False)
+    print_result(success, f"Validación de ID inválido - Status: {response.status_code if response else 'N/A'}")
+
+def test_list_songs_missing_param():
+    """Prueba list sin parámetro ids"""
+    print_test_header("GET /song/list - Validación sin parámetro 'ids'")
+    
+    success, response = make_request("GET", "/song/list", expected_status=400, requires_auth=False)
+    print_result(success, f"Validación sin parámetro - Status: {response.status_code if response else 'N/A'}")
+
+def test_filter_songs():
+    """Prueba filtrar canciones por géneros y artistas"""
+    print_test_header("GET /song/filter - Filtrar canciones")
+    
+    # Crear canción con géneros específicos
+    song_data = {
+        "title": "Filter Test Song",
+        "genres": [1, 2],
+        "cover": "data:image/png;base64,test",
+        "price": 7.99,
+        "trackId": 800001,
+        "duration": 200
+    }
+    
+    success, response = make_request("POST", "/song/upload", song_data, 200)
+    song_id = None
+    if success and response:
+        try:
+            song_id = response.json().get("songId")
+        except:
+            pass
+    
+    if song_id:
+        # Filtrar por género
+        success, response = make_request("GET", "/song/filter?genres=1", expected_status=200, requires_auth=False)
+        if success and response:
+            try:
+                results = response.json()
+                song_in_results = any(item.get("songId") == song_id for item in results)
+                print_result(song_in_results, f"Canción encontrada en filtro por género")
+            except Exception as e:
+                print_result(False, f"Error al parsear respuesta: {e}")
+        else:
+            print_result(False, f"Error al filtrar - Status: {response.status_code if response else 'N/A'}")
+        
+        # Probar ordenamiento
+        success, response = make_request("GET", "/song/filter?genres=1&order=date&direction=asc", expected_status=200, requires_auth=False)
+        print_result(success, f"Filtro con ordenamiento - Status: {response.status_code if response else 'N/A'}")
+        
+        # Limpiar
+        make_request("DELETE", f"/song/{song_id}")
+    else:
+        print_result(False, "No se pudo crear canción para la prueba")
+
+def test_filter_songs_missing_param():
+    """Prueba filter sin parámetros"""
+    print_test_header("GET /song/filter - Validación sin parámetros")
+    
+    success, response = make_request("GET", "/song/filter", expected_status=400, requires_auth=False)
+    print_result(success, f"Validación sin parámetros - Status: {response.status_code if response else 'N/A'}")
+
 def test_upload_song():
     """Prueba crear una nueva canción"""
     print_test_header("POST /song/upload - Crear canción")
@@ -363,6 +478,106 @@ def test_delete_song(song_id: int):
 # =============================================================================
 # PRUEBAS DE ALBUMS
 # =============================================================================
+
+def test_list_albums():
+    """Prueba obtener lista de álbumes por IDs"""
+    print_test_header("GET /album/list - Obtener lista de álbumes por IDs")
+    
+    # Crear algunos álbumes
+    album_ids = []
+    for i in range(2):
+        album_data = {
+            "title": f"List Test Album {i+1}",
+            "songs": [],
+            "cover": "data:image/png;base64,test",
+            "price": 15.99
+        }
+        success, response = make_request("POST", "/album/upload", album_data, 200)
+        if success and response:
+            try:
+                album_id = response.json().get("albumId")
+                album_ids.append(album_id)
+            except:
+                pass
+    
+    if len(album_ids) > 0:
+        # Probar el endpoint list
+        ids_param = ",".join(map(str, album_ids))
+        success, response = make_request("GET", f"/album/list?ids={ids_param}", expected_status=200, requires_auth=False)
+        
+        if success and response:
+            try:
+                albums = response.json()
+                print_result(len(albums) == len(album_ids), f"Recibidos {len(albums)} álbumes de {len(album_ids)} solicitados")
+            except Exception as e:
+                print_result(False, f"Error al parsear respuesta: {e}")
+        else:
+            print_result(False, f"Error al obtener lista - Status: {response.status_code if response else 'N/A'}")
+        
+        # Limpiar
+        for album_id in album_ids:
+            make_request("DELETE", f"/album/{album_id}")
+    else:
+        print_result(False, "No se pudieron crear álbumes para la prueba")
+
+def test_filter_albums():
+    """Prueba filtrar álbumes por géneros y artistas"""
+    print_test_header("GET /album/filter - Filtrar álbumes")
+    
+    # Crear canción con género
+    song_data = {
+        "title": "Album Filter Test Song",
+        "genres": [1],
+        "cover": "data:image/png;base64,test",
+        "price": 4.99,
+        "trackId": 900001,
+        "duration": 180
+    }
+    
+    success, response = make_request("POST", "/song/upload", song_data, 200)
+    song_id = None
+    if success and response:
+        try:
+            song_id = response.json().get("songId")
+        except:
+            pass
+    
+    if song_id:
+        # Crear álbum con esa canción
+        album_data = {
+            "title": "Filter Test Album",
+            "songs": [song_id],
+            "cover": "data:image/png;base64,test",
+            "price": 12.99
+        }
+        
+        success, response = make_request("POST", "/album/upload", album_data, 200)
+        album_id = None
+        if success and response:
+            try:
+                album_id = response.json().get("albumId")
+            except:
+                pass
+        
+        if album_id:
+            # Filtrar por género
+            success, response = make_request("GET", "/album/filter?genres=1", expected_status=200, requires_auth=False)
+            if success and response:
+                try:
+                    results = response.json()
+                    album_in_results = any(item.get("albumId") == album_id for item in results)
+                    print_result(album_in_results, f"Álbum encontrado en filtro por género")
+                except Exception as e:
+                    print_result(False, f"Error al parsear respuesta: {e}")
+            else:
+                print_result(False, f"Error al filtrar - Status: {response.status_code if response else 'N/A'}")
+            
+            # Limpiar
+            make_request("DELETE", f"/album/{album_id}")
+        
+        make_request("DELETE", f"/song/{song_id}")
+    else:
+        print_result(False, "No se pudo crear canción para la prueba")
 
 def test_linked_albums():
     """Prueba que linked_albums muestre correctamente álbumes donde aparece una canción"""
@@ -668,6 +883,93 @@ def test_delete_album(album_id: int):
 # PRUEBAS DE MERCHANDISING
 # =============================================================================
 
+def test_list_merch():
+    """Prueba obtener lista de merchandising por IDs"""
+    print_test_header("GET /merch/list - Obtener lista de merchandising por IDs")
+    
+    # Crear algunos merchandising
+    merch_ids = []
+    for i in range(2):
+        merch_data = {
+            "title": f"List Test Merch {i+1}",
+            "description": "Test merch",
+            "cover": "data:image/png;base64,test",
+            "price": 20.00
+        }
+        success, response = make_request("POST", "/merch/upload", merch_data, 200)
+        if success and response:
+            try:
+                merch_id = response.json().get("merchId")
+                merch_ids.append(merch_id)
+            except:
+                pass
+    
+    if len(merch_ids) > 0:
+        # Probar el endpoint list
+        ids_param = ",".join(map(str, merch_ids))
+        success, response = make_request("GET", f"/merch/list?ids={ids_param}", expected_status=200, requires_auth=False)
+        
+        if success and response:
+            try:
+                merchs = response.json()
+                print_result(len(merchs) == len(merch_ids), f"Recibidos {len(merchs)} merchandising de {len(merch_ids)} solicitados")
+            except Exception as e:
+                print_result(False, f"Error al parsear respuesta: {e}")
+        else:
+            print_result(False, f"Error al obtener lista - Status: {response.status_code if response else 'N/A'}")
+        
+        # Limpiar
+        for merch_id in merch_ids:
+            make_request("DELETE", f"/merch/{merch_id}")
+    else:
+        print_result(False, "No se pudieron crear merchandising para la prueba")
+
+def test_filter_merch():
+    """Prueba filtrar merchandising por artistas"""
+    print_test_header("GET /merch/filter - Filtrar merchandising")
+    
+    # Crear merchandising
+    merch_data = {
+        "title": "Filter Test Merch",
+        "description": "Test",
+        "cover": "data:image/png;base64,test",
+        "price": 25.00
+    }
+    
+    success, response = make_request("POST", "/merch/upload", merch_data, 200)
+    merch_id = None
+    artist_id = None
+    
+    if success and response:
+        try:
+            merch_id = response.json().get("merchId")
+            
+            # Obtener el artista del merchandising
+            success2, response2 = make_request("GET", f"/merch/{merch_id}", expected_status=200, requires_auth=False)
+            if success2 and response2:
+                merch_info = response2.json()
+                artist_id = merch_info.get("artistId")
+        except:
+            pass
+    
+    if merch_id and artist_id:
+        # Filtrar por artista
+        success, response = make_request("GET", f"/merch/filter?artists={artist_id}", expected_status=200, requires_auth=False)
+        if success and response:
+            try:
+                results = response.json()
+                merch_in_results = any(item.get("merchId") == merch_id for item in results)
+                print_result(merch_in_results, f"Merchandising encontrado en filtro por artista")
+            except Exception as e:
+                print_result(False, f"Error al parsear respuesta: {e}")
+        else:
+            print_result(False, f"Error al filtrar - Status: {response.status_code if response else 'N/A'}")
+        
+        # Limpiar
+        make_request("DELETE", f"/merch/{merch_id}")
+    else:
+        print_result(False, "No se pudo crear merchandising para la prueba")
+
 def test_upload_merch():
     """Prueba crear merchandising"""
     print_test_header("POST /merch/upload - Crear merchandising")
@@ -742,6 +1044,93 @@ def test_delete_merch(merch_id: int):
 # =============================================================================
 # PRUEBAS DE ARTISTS
 # =============================================================================
+
+def test_list_artists():
+    """Prueba obtener lista de artistas por IDs"""
+    print_test_header("GET /artist/list - Obtener lista de artistas por IDs")
+    
+    # Buscar artistas existentes
+    success, response = make_request("GET", "/artist/search?q=", expected_status=200, requires_auth=False)
+    artist_ids = []
+    
+    if success and response:
+        try:
+            results = response.json()
+            # Tomar los primeros 2 artistas
+            artist_ids = [item.get("artistId") for item in results[:2] if "artistId" in item]
+        except:
+            pass
+    
+    if len(artist_ids) > 0:
+        # Probar el endpoint list
+        ids_param = ",".join(map(str, artist_ids))
+        success, response = make_request("GET", f"/artist/list?ids={ids_param}", expected_status=200, requires_auth=False)
+        
+        if success and response:
+            try:
+                artists = response.json()
+                print_result(len(artists) > 0, f"Recibidos {len(artists)} artistas")
+                
+                # Verificar estructura
+                if len(artists) > 0:
+                    first_artist = artists[0]
+                    required_fields = ['artistId', 'artisticName', 'owner_songs', 'owner_albums', 'owner_merch']
+                    has_all_fields = all(field in first_artist for field in required_fields)
+                    print_result(has_all_fields, f"Estructura de datos completa")
+            except Exception as e:
+                print_result(False, f"Error al parsear respuesta: {e}")
+        else:
+            print_result(False, f"Error al obtener lista - Status: {response.status_code if response else 'N/A'}")
+    else:
+        print_result(True, "No hay artistas para probar (OK si no hay datos)")
+
+def test_filter_artists():
+    """Prueba filtrar artistas por géneros"""
+    print_test_header("GET /artist/filter - Filtrar artistas")
+    
+    # Crear canción con género
+    song_data = {
+        "title": "Artist Filter Test Song",
+        "genres": [1],
+        "cover": "data:image/png;base64,test",
+        "price": 3.99,
+        "trackId": 950001,
+        "duration": 150
+    }
+    
+    success, response = make_request("POST", "/song/upload", song_data, 200)
+    song_id = None
+    artist_id = None
+    
+    if success and response:
+        try:
+            song_id = response.json().get("songId")
+            
+            # Obtener el artista de la canción
+            success2, response2 = make_request("GET", f"/song/{song_id}", expected_status=200, requires_auth=False)
+            if success2 and response2:
+                song_info = response2.json()
+                artist_id = song_info.get("artistId")
+        except:
+            pass
+    
+    if song_id and artist_id:
+        # Filtrar por género
+        success, response = make_request("GET", "/artist/filter?genres=1", expected_status=200, requires_auth=False)
+        if success and response:
+            try:
+                results = response.json()
+                artist_in_results = any(item.get("artistId") == int(artist_id) for item in results)
+                print_result(artist_in_results, f"Artista encontrado en filtro por género")
+            except Exception as e:
+                print_result(False, f"Error al parsear respuesta: {e}")
+        else:
+            print_result(False, f"Error al filtrar - Status: {response.status_code if response else 'N/A'}")
+        
+        # Limpiar
+        make_request("DELETE", f"/song/{song_id}")
+    else:
+        print_result(False, "No se pudo crear canción para la prueba")
 
 def test_upload_artist():
     """Prueba crear un artista"""
@@ -891,6 +1280,16 @@ def main():
     cleanup_all([], album_ids, [], [])
     
     # =========================================================================
+    # SECCIÓN 2.5: NUEVOS ENDPOINTS DE ALBUM (list y filter)
+    # =========================================================================
+    print(f"\n{Colors.YELLOW}{'='*60}")
+    print("SECCIÓN 2.5: PRUEBAS DE NUEVOS ENDPOINTS DE ALBUM (list y filter)")
+    print(f"{'='*60}{Colors.RESET}")
+    
+    test_list_albums()
+    test_filter_albums()
+    
+    # =========================================================================
     # SECCIÓN 3: SONG SINGLE - Crear canción sin álbum y probar
     # =========================================================================
     print(f"\n{Colors.YELLOW}{'='*60}")
@@ -908,6 +1307,19 @@ def main():
     
     # Limpiar
     cleanup_all(song_ids, [], [], [])
+    
+    # =========================================================================
+    # SECCIÓN 3.5: NUEVOS ENDPOINTS DE SONG (list y filter)
+    # =========================================================================
+    print(f"\n{Colors.YELLOW}{'='*60}")
+    print("SECCIÓN 3.5: PRUEBAS DE NUEVOS ENDPOINTS DE SONG (list y filter)")
+    print(f"{'='*60}{Colors.RESET}")
+    
+    test_list_songs()
+    test_list_songs_invalid_id()
+    test_list_songs_missing_param()
+    test_filter_songs()
+    test_filter_songs_missing_param()
     
     # =========================================================================
     # SECCIÓN 4: SONG con albumId desde creación
@@ -1079,6 +1491,16 @@ def main():
     cleanup_all([], [], merch_ids, [])
     
     # =========================================================================
+    # SECCIÓN 6.5: NUEVOS ENDPOINTS DE MERCH (list y filter)
+    # =========================================================================
+    print(f"\n{Colors.YELLOW}{'='*60}")
+    print("SECCIÓN 6.5: PRUEBAS DE NUEVOS ENDPOINTS DE MERCH (list y filter)")
+    print(f"{'='*60}{Colors.RESET}")
+    
+    test_list_merch()
+    test_filter_merch()
+    
+    # =========================================================================
     # SECCIÓN 7: Verificar campos owner_* en Artist
     # =========================================================================
     print(f"\n{Colors.YELLOW}{'='*60}")
@@ -1202,6 +1624,16 @@ def main():
     
     # Limpiar
     cleanup_all(song_ids, album_ids, merch_ids, [])
+    
+    # =========================================================================
+    # SECCIÓN 7.5: NUEVOS ENDPOINTS DE ARTIST (list y filter)
+    # =========================================================================
+    print(f"\n{Colors.YELLOW}{'='*60}")
+    print("SECCIÓN 7.5: PRUEBAS DE NUEVOS ENDPOINTS DE ARTIST (list y filter)")
+    print(f"{'='*60}{Colors.RESET}")
+    
+    test_list_artists()
+    test_filter_artists()
     
     # =========================================================================
     # PRUEBAS ADICIONALES

@@ -1,24 +1,20 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\PiporNet\\source\\repos\\tya\\tya.vbproj": {}
+    "C:\\Users\\Driox\\Source\\asee\\proyecto-gps-25-26-TYA\\tya.vbproj": {}
   },
   "projects": {
-    "C:\\Users\\PiporNet\\source\\repos\\tya\\tya.vbproj": {
+    "C:\\Users\\Driox\\Source\\asee\\proyecto-gps-25-26-TYA\\tya.vbproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\PiporNet\\source\\repos\\tya\\tya.vbproj",
+        "projectUniqueName": "C:\\Users\\Driox\\Source\\asee\\proyecto-gps-25-26-TYA\\tya.vbproj",
         "projectName": "tya",
-        "projectPath": "C:\\Users\\PiporNet\\source\\repos\\tya\\tya.vbproj",
-        "packagesPath": "C:\\Users\\PiporNet\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\PiporNet\\source\\repos\\tya\\obj\\",
+        "projectPath": "C:\\Users\\Driox\\Source\\asee\\proyecto-gps-25-26-TYA\\tya.vbproj",
+        "packagesPath": "C:\\Users\\Driox\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\Driox\\Source\\asee\\proyecto-gps-25-26-TYA\\obj\\",
         "projectStyle": "PackageReference",
-        "fallbackFolders": [
-          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
-        ],
         "configFilePaths": [
-          "C:\\Users\\PiporNet\\AppData\\Roaming\\NuGet\\NuGet.Config",
-          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+          "C:\\Users\\Driox\\AppData\\Roaming\\NuGet\\NuGet.Config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
         ],
         "originalTargetFrameworks": [
@@ -26,7 +22,6 @@
         ],
         "sources": {
           "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
-          "C:\\Program Files\\dotnet\\library-packs": {},
           "https://api.nuget.org/v3/index.json": {}
         },
         "frameworks": {
@@ -45,7 +40,7 @@
           "auditLevel": "low",
           "auditMode": "direct"
         },
-        "SdkAnalysisLevel": "9.0.300"
+        "SdkAnalysisLevel": "10.0.100"
       },
       "frameworks": {
         "net8.0": {
@@ -76,7 +71,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.306/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100/PortableRuntimeIdentifierGraph.json"
         }
       }
     }

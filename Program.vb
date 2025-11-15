@@ -121,6 +121,12 @@ Module Program
                 ElseIf action = "search" AndAlso request.HttpMethod = "GET" Then
                     searchSong(request, action, jsonResponse, statusCode)
 
+                ElseIf action = "list" AndAlso request.HttpMethod = "GET" Then
+                    listSongs(request, action, jsonResponse, statusCode)
+
+                ElseIf action = "filter" AndAlso request.HttpMethod = "GET" Then
+                    filterSongs(request, action, jsonResponse, statusCode)
+
                 ElseIf IsNumeric(action) AndAlso request.HttpMethod = "GET" Then
                     getSong(request, action, jsonResponse, statusCode)
 
@@ -144,6 +150,12 @@ Module Program
 
                 ElseIf action = "search" AndAlso request.HttpMethod = "GET" Then
                     searchAlbum(request, action, jsonResponse, statusCode)
+
+                ElseIf action = "list" AndAlso request.HttpMethod = "GET" Then
+                    listAlbums(request, action, jsonResponse, statusCode)
+
+                ElseIf action = "filter" AndAlso request.HttpMethod = "GET" Then
+                    filterAlbums(request, action, jsonResponse, statusCode)
 
                 ElseIf IsNumeric(action) AndAlso request.HttpMethod = "GET" Then
                     getAlbum(request, action, jsonResponse, statusCode)
@@ -169,6 +181,12 @@ Module Program
                 ElseIf action = "search" AndAlso request.HttpMethod = "GET" Then
                     searchMerch(request, action, jsonResponse, statusCode)
 
+                ElseIf action = "list" AndAlso request.HttpMethod = "GET" Then
+                    listMerch(request, action, jsonResponse, statusCode)
+
+                ElseIf action = "filter" AndAlso request.HttpMethod = "GET" Then
+                    filterMerch(request, action, jsonResponse, statusCode)
+
                 ElseIf IsNumeric(action) AndAlso request.HttpMethod = "GET" Then
                     getMerch(request, action, jsonResponse, statusCode)
 
@@ -192,6 +210,12 @@ Module Program
 
                 ElseIf action = "search" AndAlso request.HttpMethod = "GET" Then
                     searchArtist(request, action, jsonResponse, statusCode)
+
+                ElseIf action = "list" AndAlso request.HttpMethod = "GET" Then
+                    listArtists(request, action, jsonResponse, statusCode)
+
+                ElseIf action = "filter" AndAlso request.HttpMethod = "GET" Then
+                    filterArtists(request, action, jsonResponse, statusCode)
 
                 ElseIf IsNumeric(action) AndAlso request.HttpMethod = "GET" Then
                     getArtist(request, action, jsonResponse, statusCode)
@@ -518,6 +542,242 @@ Module Program
             statusCode = HttpStatusCode.InternalServerError
         End Try
     End Sub
+
+    Sub listSongs(request As HttpListenerRequest, action As String, ByRef jsonResponse As String, ByRef statusCode As Integer)
+        Try
+            ' Obtener parámetro de lista de IDs
+            Dim idsParam As String = request.QueryString("ids")
+            If String.IsNullOrEmpty(idsParam) Then
+                jsonResponse = GenerateErrorResponse("400", "Parámetro 'ids' requerido")
+                statusCode = HttpStatusCode.BadRequest
+                Return
+            End If
+
+            ' Dividir los IDs por comas
+            Dim idStrings As String() = idsParam.Split(","c)
+            Dim songIds As New List(Of Integer)
+
+            ' Parsear y validar los IDs
+            For Each idStr In idStrings
+                Dim songId As Integer
+                If Integer.TryParse(idStr.Trim(), songId) Then
+                    songIds.Add(songId)
+                Else
+                    jsonResponse = GenerateErrorResponse("400", "ID inválido: " & idStr)
+                    statusCode = HttpStatusCode.BadRequest
+                    Return
+                End If
+            Next
+
+            ' Obtener los datos de todas las canciones
+            Dim results As New List(Of Dictionary(Of String, Object))
+
+            For Each songId In songIds
+                Dim songData As Dictionary(Of String, Object) = GetSongData(songId)
+                If songData IsNot Nothing Then
+                    results.Add(songData)
+                End If
+            Next
+
+            jsonResponse = ConvertToJson(results)
+            statusCode = HttpStatusCode.OK
+
+        Catch ex As Exception
+            jsonResponse = GenerateErrorResponse("500", "Error al obtener canciones: " & ex.Message)
+            statusCode = HttpStatusCode.InternalServerError
+        End Try
+    End Sub
+
+    Sub filterSongs(request As HttpListenerRequest, action As String, ByRef jsonResponse As String, ByRef statusCode As Integer)
+        Try
+            ' Obtener parámetros de filtro
+            Dim genresParam As String = request.QueryString("genres")
+            Dim artistsParam As String = request.QueryString("artists")
+            Dim orderParam As String = request.QueryString("order")
+            Dim directionParam As String = request.QueryString("direction")
+
+            ' Validar que al menos un filtro esté presente
+            If String.IsNullOrEmpty(genresParam) AndAlso String.IsNullOrEmpty(artistsParam) Then
+                jsonResponse = GenerateErrorResponse("400", "Se requiere al menos un parámetro de filtro (genres o artists)")
+                statusCode = HttpStatusCode.BadRequest
+                Return
+            End If
+
+            ' Parsear géneros
+            Dim genreIds As New List(Of Integer)
+            If Not String.IsNullOrEmpty(genresParam) Then
+                For Each genreStr In genresParam.Split(","c)
+                    Dim genreId As Integer
+                    If Integer.TryParse(genreStr.Trim(), genreId) Then
+                        genreIds.Add(genreId)
+                    End If
+                Next
+            End If
+
+            ' Parsear artistas
+            Dim artistIds As New List(Of Integer)
+            If Not String.IsNullOrEmpty(artistsParam) Then
+                For Each artistStr In artistsParam.Split(","c)
+                    Dim artistId As Integer
+                    If Integer.TryParse(artistStr.Trim(), artistId) Then
+                        artistIds.Add(artistId)
+                    End If
+                Next
+            End If
+
+            ' Construir query SQL
+            Dim orderField As String = "c.idcancion"
+
+            ' Determinar campo de ordenamiento
+            If Not String.IsNullOrEmpty(orderParam) Then
+                If orderParam.ToLower() = "date" Then
+                    orderField = "c.fechalanzamiento"
+                ElseIf orderParam.ToLower() = "name" Then
+                    orderField = "c.titulo"
+                End If
+            End If
+
+            ' SELECT con el campo de ordenamiento para evitar error con DISTINCT
+            Dim sqlQuery As String = $"SELECT DISTINCT c.idcancion, {orderField} FROM canciones c "
+            Dim whereClauses As New List(Of String)
+
+            ' Filtro por géneros
+            If genreIds.Count > 0 Then
+                sqlQuery &= "INNER JOIN generoscanciones gc ON c.idcancion = gc.idcancion "
+                whereClauses.Add("gc.idgenero IN (" & String.Join(",", genreIds) & ")")
+            End If
+
+            ' Filtro por artistas
+            If artistIds.Count > 0 Then
+                sqlQuery &= "INNER JOIN autorescanciones ac ON c.idcancion = ac.idcancion "
+                whereClauses.Add("ac.idartista IN (" & String.Join(",", artistIds) & ")")
+            End If
+
+            ' Agregar WHERE clause
+            If whereClauses.Count > 0 Then
+                sqlQuery &= "WHERE " & String.Join(" AND ", whereClauses) & " "
+            End If
+
+            ' Agregar ORDER BY
+            sqlQuery &= $"ORDER BY {orderField} "
+
+            ' Dirección del ordenamiento
+            If Not String.IsNullOrEmpty(directionParam) AndAlso directionParam.ToLower() = "desc" Then
+                sqlQuery &= "DESC"
+            Else
+                sqlQuery &= "ASC"
+            End If
+
+            ' Ejecutar query
+            Dim results As New List(Of Dictionary(Of String, Object))
+            Using cmd = db.CreateCommand(sqlQuery)
+                Using reader = cmd.ExecuteReader()
+                    While reader.Read()
+                        results.Add(New Dictionary(Of String, Object) From {{"songId", reader.GetInt32(0)}})
+                    End While
+                End Using
+            End Using
+
+            jsonResponse = ConvertToJson(results)
+            statusCode = HttpStatusCode.OK
+
+        Catch ex As Exception
+            jsonResponse = GenerateErrorResponse("500", "Error al filtrar canciones: " & ex.Message)
+            statusCode = HttpStatusCode.InternalServerError
+        End Try
+    End Sub
+
+    ' Función auxiliar para obtener datos completos de una canción
+    Function GetSongData(songId As Integer) As Dictionary(Of String, Object)
+        Try
+            Dim schema As New Dictionary(Of String, Object) From {
+                {"songId", songId},
+                {"title", Nothing},
+                {"artistId", Nothing},
+                {"collaborators", Nothing},
+                {"releaseDate", Nothing},
+                {"description", Nothing},
+                {"duration", Nothing},
+                {"genres", Nothing},
+                {"cover", Nothing},
+                {"price", Nothing},
+                {"albumId", Nothing},
+                {"trackId", Nothing},
+                {"linked_albums", Nothing}
+            }
+
+            ' Recuperar datos básicos
+            Using cmd = db.CreateCommand("SELECT titulo, descripcion, cover, duracion, fechalanzamiento, precio, track, albumog FROM canciones WHERE idcancion = @id")
+                cmd.Parameters.AddWithValue("@id", songId)
+                Using reader = cmd.ExecuteReader()
+                    If reader.HasRows Then
+                        While reader.Read()
+                            schema("title") = reader.GetString(0)
+                            schema("description") = If(reader.IsDBNull(1), Nothing, reader.GetString(1))
+                            schema("cover") = reader.GetString(2)
+                            schema("duration") = reader.GetInt32(3).ToString()
+                            schema("releaseDate") = reader.GetDateTime(4).ToString("yyyy-MM-dd")
+                            schema("price") = reader.GetDecimal(5).ToString()
+                            schema("trackId") = reader.GetInt32(6).ToString()
+                            schema("albumId") = If(reader.IsDBNull(7), Nothing, CType(reader.GetInt32(7), Object))
+                        End While
+                    Else
+                        Return Nothing
+                    End If
+                End Using
+            End Using
+
+            ' Recuperar autor y colaboradores
+            Dim collaborators As New List(Of Integer)
+            Using cmd = db.CreateCommand("SELECT idartista, ft FROM autorescanciones WHERE idcancion = @id")
+                cmd.Parameters.AddWithValue("@id", songId)
+                Using reader = cmd.ExecuteReader()
+                    While reader.Read()
+                        If reader.GetBoolean(1) = False Then
+                            schema("artistId") = reader.GetInt32(0).ToString()
+                        Else
+                            collaborators.Add(reader.GetInt32(0))
+                        End If
+                    End While
+                End Using
+            End Using
+            schema("collaborators") = collaborators
+
+            ' Recuperar géneros
+            Dim genres As New List(Of String)
+            Using cmd = db.CreateCommand("SELECT idgenero FROM generoscanciones WHERE idcancion = @id")
+                cmd.Parameters.AddWithValue("@id", songId)
+                Using reader = cmd.ExecuteReader()
+                    While reader.Read()
+                        genres.Add(reader.GetInt32(0).ToString())
+                    End While
+                End Using
+            End Using
+            schema("genres") = genres
+
+            ' Recuperar álbumes enlazados (linked_albums)
+            Dim linkedAlbums As New List(Of Integer)
+            Dim albumOgId As Object = schema("albumId")
+            Using cmd = db.CreateCommand("SELECT idalbum FROM cancionesalbumes WHERE idcancion = @id")
+                cmd.Parameters.AddWithValue("@id", songId)
+                Using reader = cmd.ExecuteReader()
+                    While reader.Read()
+                        Dim linkedAlbumId As Integer = reader.GetInt32(0)
+                        If albumOgId Is Nothing OrElse linkedAlbumId <> CInt(albumOgId) Then
+                            linkedAlbums.Add(linkedAlbumId)
+                        End If
+                    End While
+                End Using
+            End Using
+            schema("linked_albums") = linkedAlbums
+
+            Return schema
+
+        Catch ex As Exception
+            Console.WriteLine($"Error al obtener datos de canción {songId}: {ex.Message}")
+            Return Nothing
+        End Try
+    End Function
 
     Sub getSong(request As HttpListenerRequest, action As String, ByRef jsonResponse As String, ByRef statusCode As Integer)
         If Not IsNumeric(action) Then
@@ -916,6 +1176,234 @@ Module Program
         End Try
     End Sub
 
+    Sub listAlbums(request As HttpListenerRequest, action As String, ByRef jsonResponse As String, ByRef statusCode As Integer)
+        Try
+            ' Obtener parámetro de lista de IDs
+            Dim idsParam As String = request.QueryString("ids")
+            If String.IsNullOrEmpty(idsParam) Then
+                jsonResponse = GenerateErrorResponse("400", "Parámetro 'ids' requerido")
+                statusCode = HttpStatusCode.BadRequest
+                Return
+            End If
+
+            ' Dividir los IDs por comas
+            Dim idStrings As String() = idsParam.Split(","c)
+            Dim albumIds As New List(Of Integer)
+
+            ' Parsear y validar los IDs
+            For Each idStr In idStrings
+                Dim albumId As Integer
+                If Integer.TryParse(idStr.Trim(), albumId) Then
+                    albumIds.Add(albumId)
+                Else
+                    jsonResponse = GenerateErrorResponse("400", "ID inválido: " & idStr)
+                    statusCode = HttpStatusCode.BadRequest
+                    Return
+                End If
+            Next
+
+            ' Obtener los datos de todos los álbumes
+            Dim results As New List(Of Dictionary(Of String, Object))
+
+            For Each albumId In albumIds
+                Dim albumData As Dictionary(Of String, Object) = GetAlbumData(albumId)
+                If albumData IsNot Nothing Then
+                    results.Add(albumData)
+                End If
+            Next
+
+            jsonResponse = ConvertToJson(results)
+            statusCode = HttpStatusCode.OK
+
+        Catch ex As Exception
+            jsonResponse = GenerateErrorResponse("500", "Error al obtener álbumes: " & ex.Message)
+            statusCode = HttpStatusCode.InternalServerError
+        End Try
+    End Sub
+
+    Sub filterAlbums(request As HttpListenerRequest, action As String, ByRef jsonResponse As String, ByRef statusCode As Integer)
+        Try
+            ' Obtener parámetros de filtro
+            Dim genresParam As String = request.QueryString("genres")
+            Dim artistsParam As String = request.QueryString("artists")
+            Dim orderParam As String = request.QueryString("order")
+            Dim directionParam As String = request.QueryString("direction")
+
+            ' Validar que al menos un filtro esté presente
+            If String.IsNullOrEmpty(genresParam) AndAlso String.IsNullOrEmpty(artistsParam) Then
+                jsonResponse = GenerateErrorResponse("400", "Se requiere al menos un parámetro de filtro (genres o artists)")
+                statusCode = HttpStatusCode.BadRequest
+                Return
+            End If
+
+            ' Parsear géneros
+            Dim genreIds As New List(Of Integer)
+            If Not String.IsNullOrEmpty(genresParam) Then
+                For Each genreStr In genresParam.Split(","c)
+                    Dim genreId As Integer
+                    If Integer.TryParse(genreStr.Trim(), genreId) Then
+                        genreIds.Add(genreId)
+                    End If
+                Next
+            End If
+
+            ' Parsear artistas
+            Dim artistIds As New List(Of Integer)
+            If Not String.IsNullOrEmpty(artistsParam) Then
+                For Each artistStr In artistsParam.Split(","c)
+                    Dim artistId As Integer
+                    If Integer.TryParse(artistStr.Trim(), artistId) Then
+                        artistIds.Add(artistId)
+                    End If
+                Next
+            End If
+
+            ' Construir query SQL
+            Dim orderField As String = "a.idalbum"
+
+            ' Determinar campo de ordenamiento
+            If Not String.IsNullOrEmpty(orderParam) Then
+                If orderParam.ToLower() = "date" Then
+                    orderField = "a.fechalanzamiento"
+                ElseIf orderParam.ToLower() = "name" Then
+                    orderField = "a.titulo"
+                End If
+            End If
+
+            ' SELECT con el campo de ordenamiento para evitar error con DISTINCT
+            Dim sqlQuery As String = $"SELECT DISTINCT a.idalbum, {orderField} FROM albumes a "
+            Dim whereClauses As New List(Of String)
+
+            ' Filtro por géneros (a través de las canciones del álbum)
+            If genreIds.Count > 0 Then
+                sqlQuery &= "INNER JOIN cancionesalbumes ca ON a.idalbum = ca.idalbum " &
+                           "INNER JOIN generoscanciones gc ON ca.idcancion = gc.idcancion "
+                whereClauses.Add("gc.idgenero IN (" & String.Join(",", genreIds) & ")")
+            End If
+
+            ' Filtro por artistas
+            If artistIds.Count > 0 Then
+                sqlQuery &= "INNER JOIN autoresalbumes aa ON a.idalbum = aa.idalbum "
+                whereClauses.Add("aa.idartista IN (" & String.Join(",", artistIds) & ")")
+            End If
+
+            ' Agregar WHERE clause
+            If whereClauses.Count > 0 Then
+                sqlQuery &= "WHERE " & String.Join(" AND ", whereClauses) & " "
+            End If
+
+            ' Agregar ORDER BY
+            sqlQuery &= $"ORDER BY {orderField} "
+
+            ' Dirección del ordenamiento
+            If Not String.IsNullOrEmpty(directionParam) AndAlso directionParam.ToLower() = "desc" Then
+                sqlQuery &= "DESC"
+            Else
+                sqlQuery &= "ASC"
+            End If
+
+            ' Ejecutar query
+            Dim results As New List(Of Dictionary(Of String, Object))
+            Using cmd = db.CreateCommand(sqlQuery)
+                Using reader = cmd.ExecuteReader()
+                    While reader.Read()
+                        results.Add(New Dictionary(Of String, Object) From {{"albumId", reader.GetInt32(0)}})
+                    End While
+                End Using
+            End Using
+
+            jsonResponse = ConvertToJson(results)
+            statusCode = HttpStatusCode.OK
+
+        Catch ex As Exception
+            jsonResponse = GenerateErrorResponse("500", "Error al filtrar álbumes: " & ex.Message)
+            statusCode = HttpStatusCode.InternalServerError
+        End Try
+    End Sub
+
+    ' Función auxiliar para obtener datos completos de un álbum
+    Function GetAlbumData(albumId As Integer) As Dictionary(Of String, Object)
+        Try
+            Dim schema As New Dictionary(Of String, Object) From {
+                {"albumId", albumId},
+                {"title", Nothing},
+                {"artistId", Nothing},
+                {"collaborators", Nothing},
+                {"description", Nothing},
+                {"releaseDate", Nothing},
+                {"genres", Nothing},
+                {"songs", Nothing},
+                {"cover", Nothing},
+                {"price", Nothing}
+            }
+
+            ' Recuperar datos del álbum
+            Using cmd = db.CreateCommand("SELECT titulo, cover, fechalanzamiento, precio FROM albumes WHERE idalbum = @id")
+                cmd.Parameters.AddWithValue("@id", albumId)
+                Using reader = cmd.ExecuteReader()
+                    If reader.HasRows Then
+                        While reader.Read()
+                            schema("title") = reader.GetString(0)
+                            schema("cover") = reader.GetString(1)
+                            schema("releaseDate") = reader.GetDateTime(2).ToString("yyyy-MM-dd")
+                            schema("price") = reader.GetDecimal(3).ToString()
+                        End While
+                    Else
+                        Return Nothing
+                    End If
+                End Using
+            End Using
+
+            ' Recuperar autor y colaboradores
+            Dim collaborators As New List(Of Integer)
+            Using cmd = db.CreateCommand("SELECT idartista, ft FROM autoresalbumes WHERE idalbum = @id")
+                cmd.Parameters.AddWithValue("@id", albumId)
+                Using reader = cmd.ExecuteReader()
+                    While reader.Read()
+                        If reader.GetBoolean(1) = False Then
+                            schema("artistId") = reader.GetInt32(0).ToString()
+                        Else
+                            collaborators.Add(reader.GetInt32(0))
+                        End If
+                    End While
+                End Using
+            End Using
+            schema("collaborators") = collaborators
+
+            ' Recuperar canciones del álbum
+            Dim songs As New List(Of Integer)
+            Using cmd = db.CreateCommand("SELECT idcancion FROM cancionesalbumes WHERE idalbum = @id ORDER BY tracknumber")
+                cmd.Parameters.AddWithValue("@id", albumId)
+                Using reader = cmd.ExecuteReader()
+                    While reader.Read()
+                        songs.Add(reader.GetInt32(0))
+                    End While
+                End Using
+            End Using
+            schema("songs") = songs
+
+            ' Recuperar géneros únicos de todas las canciones del álbum
+            Dim genres As New List(Of Integer)
+            Using cmd = db.CreateCommand("SELECT DISTINCT gc.idgenero FROM generoscanciones gc INNER JOIN cancionesalbumes ca ON gc.idcancion = ca.idcancion WHERE ca.idalbum = @id ORDER BY gc.idgenero")
+                cmd.Parameters.AddWithValue("@id", albumId)
+                Using reader = cmd.ExecuteReader()
+                    While reader.Read()
+                        genres.Add(reader.GetInt32(0))
+                    End While
+                End Using
+            End Using
+            schema("genres") = genres
+
+            schema("description") = ""
+
+            Return schema
+
+        Catch ex As Exception
+            Console.WriteLine($"Error al obtener datos de álbum {albumId}: {ex.Message}")
+            Return Nothing
+        End Try
+    End Function
+
     Sub getAlbum(request As HttpListenerRequest, action As String, ByRef jsonResponse As String, ByRef statusCode As Integer)
         Try
             If Not IsNumeric(action) Then
@@ -1277,6 +1765,176 @@ Module Program
         End Try
     End Sub
 
+    Sub listMerch(request As HttpListenerRequest, action As String, ByRef jsonResponse As String, ByRef statusCode As Integer)
+        Try
+            ' Obtener parámetro de lista de IDs
+            Dim idsParam As String = request.QueryString("ids")
+            If String.IsNullOrEmpty(idsParam) Then
+                jsonResponse = GenerateErrorResponse("400", "Parámetro 'ids' requerido")
+                statusCode = HttpStatusCode.BadRequest
+                Return
+            End If
+
+            ' Dividir los IDs por comas
+            Dim idStrings As String() = idsParam.Split(","c)
+            Dim merchIds As New List(Of Integer)
+
+            ' Parsear y validar los IDs
+            For Each idStr In idStrings
+                Dim merchId As Integer
+                If Integer.TryParse(idStr.Trim(), merchId) Then
+                    merchIds.Add(merchId)
+                Else
+                    jsonResponse = GenerateErrorResponse("400", "ID inválido: " & idStr)
+                    statusCode = HttpStatusCode.BadRequest
+                    Return
+                End If
+            Next
+
+            ' Obtener los datos de todos los merchandising
+            Dim results As New List(Of Dictionary(Of String, Object))
+
+            For Each merchId In merchIds
+                Dim merchData As Dictionary(Of String, Object) = GetMerchData(merchId)
+                If merchData IsNot Nothing Then
+                    results.Add(merchData)
+                End If
+            Next
+
+            jsonResponse = ConvertToJson(results)
+            statusCode = HttpStatusCode.OK
+
+        Catch ex As Exception
+            jsonResponse = GenerateErrorResponse("500", "Error al obtener merchandising: " & ex.Message)
+            statusCode = HttpStatusCode.InternalServerError
+        End Try
+    End Sub
+
+    Sub filterMerch(request As HttpListenerRequest, action As String, ByRef jsonResponse As String, ByRef statusCode As Integer)
+        Try
+            ' Obtener parámetros de filtro
+            Dim artistsParam As String = request.QueryString("artists")
+            Dim orderParam As String = request.QueryString("order")
+            Dim directionParam As String = request.QueryString("direction")
+
+            ' Validar que al menos un filtro esté presente
+            If String.IsNullOrEmpty(artistsParam) Then
+                jsonResponse = GenerateErrorResponse("400", "Se requiere el parámetro 'artists' para filtrar merchandising")
+                statusCode = HttpStatusCode.BadRequest
+                Return
+            End If
+
+            ' Parsear artistas
+            Dim artistIds As New List(Of Integer)
+            For Each artistStr In artistsParam.Split(","c)
+                Dim artistId As Integer
+                If Integer.TryParse(artistStr.Trim(), artistId) Then
+                    artistIds.Add(artistId)
+                End If
+            Next
+
+            ' Construir query SQL
+            Dim orderField As String = "m.idmerch"
+
+            ' Determinar campo de ordenamiento
+            If Not String.IsNullOrEmpty(orderParam) Then
+                If orderParam.ToLower() = "date" Then
+                    orderField = "m.fechalanzamiento"
+                ElseIf orderParam.ToLower() = "name" Then
+                    orderField = "m.titulo"
+                End If
+            End If
+
+            ' SELECT con el campo de ordenamiento para evitar error con DISTINCT
+            Dim sqlQuery As String = $"SELECT DISTINCT m.idmerch, {orderField} FROM merch m " &
+                                    "INNER JOIN AutoresMerch am ON m.idmerch = am.idmerch " &
+                                    "WHERE am.idartista IN (" & String.Join(",", artistIds) & ") "
+
+            ' Agregar ORDER BY
+            sqlQuery &= $"ORDER BY {orderField} "
+
+            ' Dirección del ordenamiento
+            If Not String.IsNullOrEmpty(directionParam) AndAlso directionParam.ToLower() = "desc" Then
+                sqlQuery &= "DESC"
+            Else
+                sqlQuery &= "ASC"
+            End If
+
+            ' Ejecutar query
+            Dim results As New List(Of Dictionary(Of String, Object))
+            Using cmd = db.CreateCommand(sqlQuery)
+                Using reader = cmd.ExecuteReader()
+                    While reader.Read()
+                        results.Add(New Dictionary(Of String, Object) From {{"merchId", reader.GetInt32(0)}})
+                    End While
+                End Using
+            End Using
+
+            jsonResponse = ConvertToJson(results)
+            statusCode = HttpStatusCode.OK
+
+        Catch ex As Exception
+            jsonResponse = GenerateErrorResponse("500", "Error al filtrar merchandising: " & ex.Message)
+            statusCode = HttpStatusCode.InternalServerError
+        End Try
+    End Sub
+
+    ' Función auxiliar para obtener datos completos de merchandising
+    Function GetMerchData(merchId As Integer) As Dictionary(Of String, Object)
+        Try
+            Dim schema As New Dictionary(Of String, Object) From {
+                {"merchId", merchId},
+                {"title", Nothing},
+                {"artistId", Nothing},
+                {"collaborators", Nothing},
+                {"releaseDate", Nothing},
+                {"description", Nothing},
+                {"price", Nothing},
+                {"cover", Nothing}
+            }
+
+            ' Recuperar datos del merchandising
+            Using cmd = db.CreateCommand("SELECT titulo, descripcion, precio, cover, fechaLanzamiento FROM merch WHERE idmerch = @id")
+                cmd.Parameters.AddWithValue("@id", merchId)
+                Using reader = cmd.ExecuteReader()
+                    If reader.HasRows Then
+                        While reader.Read()
+                            schema("title") = reader.GetString(0)
+                            schema("description") = reader.GetString(1)
+                            schema("price") = reader.GetDecimal(2).ToString()
+                            schema("cover") = reader.GetString(3)
+                            schema("releaseDate") = reader.GetDateTime(4).ToString("yyyy-MM-dd")
+                        End While
+                    Else
+                        Return Nothing
+                    End If
+                End Using
+            End Using
+
+            ' Recuperar artista creador y colaboradores
+            Dim collaborators As New List(Of Integer)
+            Using cmd = db.CreateCommand("SELECT idartista, ft FROM AutoresMerch WHERE idmerch = @id")
+                cmd.Parameters.AddWithValue("@id", merchId)
+                Using reader = cmd.ExecuteReader()
+                    While reader.Read()
+                        If reader.GetBoolean(1) = False Then
+                            schema("artistId") = reader.GetInt32(0).ToString()
+                        Else
+                            collaborators.Add(reader.GetInt32(0))
+                        End If
+                    End While
+                End Using
+            End Using
+            schema("collaborators") = collaborators
+
+            Return schema
+
+        Catch ex As Exception
+            Console.WriteLine($"Error al obtener datos de merchandising {merchId}: {ex.Message}")
+            Return Nothing
+        End Try
+    End Function
+
     Sub getMerch(request As HttpListenerRequest, action As String, ByRef jsonResponse As String, ByRef statusCode As Integer)
         Try
             If Not IsNumeric(action) Then
@@ -1539,6 +2197,202 @@ Module Program
             statusCode = HttpStatusCode.InternalServerError
         End Try
     End Sub
+
+    Sub listArtists(request As HttpListenerRequest, action As String, ByRef jsonResponse As String, ByRef statusCode As Integer)
+        Try
+            ' Obtener parámetro de lista de IDs
+            Dim idsParam As String = request.QueryString("ids")
+            If String.IsNullOrEmpty(idsParam) Then
+                jsonResponse = GenerateErrorResponse("400", "Parámetro 'ids' requerido")
+                statusCode = HttpStatusCode.BadRequest
+                Return
+            End If
+
+            ' Dividir los IDs por comas
+            Dim idStrings As String() = idsParam.Split(","c)
+            Dim artistIds As New List(Of Integer)
+
+            ' Parsear y validar los IDs
+            For Each idStr In idStrings
+                Dim artistId As Integer
+                If Integer.TryParse(idStr.Trim(), artistId) Then
+                    artistIds.Add(artistId)
+                Else
+                    jsonResponse = GenerateErrorResponse("400", "ID inválido: " & idStr)
+                    statusCode = HttpStatusCode.BadRequest
+                    Return
+                End If
+            Next
+
+            ' Obtener los datos de todos los artistas
+            Dim results As New List(Of Dictionary(Of String, Object))
+
+            For Each artistId In artistIds
+                Dim artistData As Dictionary(Of String, Object) = GetArtistData(artistId)
+                If artistData IsNot Nothing Then
+                    results.Add(artistData)
+                End If
+            Next
+
+            jsonResponse = ConvertToJson(results)
+            statusCode = HttpStatusCode.OK
+
+        Catch ex As Exception
+            jsonResponse = GenerateErrorResponse("500", "Error al obtener artistas: " & ex.Message)
+            statusCode = HttpStatusCode.InternalServerError
+        End Try
+    End Sub
+
+    Sub filterArtists(request As HttpListenerRequest, action As String, ByRef jsonResponse As String, ByRef statusCode As Integer)
+        Try
+            ' Obtener parámetros de filtro
+            Dim genresParam As String = request.QueryString("genres")
+            Dim orderParam As String = request.QueryString("order")
+            Dim directionParam As String = request.QueryString("direction")
+
+            ' Validar que al menos un filtro esté presente
+            If String.IsNullOrEmpty(genresParam) Then
+                jsonResponse = GenerateErrorResponse("400", "Se requiere el parámetro 'genres' para filtrar artistas")
+                statusCode = HttpStatusCode.BadRequest
+                Return
+            End If
+
+            ' Parsear géneros
+            Dim genreIds As New List(Of Integer)
+            For Each genreStr In genresParam.Split(","c)
+                Dim genreId As Integer
+                If Integer.TryParse(genreStr.Trim(), genreId) Then
+                    genreIds.Add(genreId)
+                End If
+            Next
+
+            ' Construir query SQL - buscar artistas que tengan canciones con esos géneros
+            Dim orderField As String = "a.idartista"
+
+            ' Determinar campo de ordenamiento
+            If Not String.IsNullOrEmpty(orderParam) Then
+                If orderParam.ToLower() = "date" Then
+                    orderField = "a.fechainicio"
+                ElseIf orderParam.ToLower() = "name" Then
+                    orderField = "a.nombre"
+                End If
+            End If
+
+            ' SELECT con el campo de ordenamiento para evitar error con DISTINCT
+            Dim sqlQuery As String = $"SELECT DISTINCT a.idartista, {orderField} FROM artistas a " &
+                                    "INNER JOIN autorescanciones ac ON a.idartista = ac.idartista " &
+                                    "INNER JOIN generoscanciones gc ON ac.idcancion = gc.idcancion " &
+                                    "WHERE gc.idgenero IN (" & String.Join(",", genreIds) & ") "
+
+            ' Agregar ORDER BY
+            sqlQuery &= $"ORDER BY {orderField} "
+
+            ' Dirección del ordenamiento
+            If Not String.IsNullOrEmpty(directionParam) AndAlso directionParam.ToLower() = "desc" Then
+                sqlQuery &= "DESC"
+            Else
+                sqlQuery &= "ASC"
+            End If
+
+            ' Ejecutar query
+            Dim results As New List(Of Dictionary(Of String, Object))
+            Using cmd = db.CreateCommand(sqlQuery)
+                Using reader = cmd.ExecuteReader()
+                    While reader.Read()
+                        results.Add(New Dictionary(Of String, Object) From {{"artistId", reader.GetInt32(0)}})
+                    End While
+                End Using
+            End Using
+
+            jsonResponse = ConvertToJson(results)
+            statusCode = HttpStatusCode.OK
+
+        Catch ex As Exception
+            jsonResponse = GenerateErrorResponse("500", "Error al filtrar artistas: " & ex.Message)
+            statusCode = HttpStatusCode.InternalServerError
+        End Try
+    End Sub
+
+    ' Función auxiliar para obtener datos completos de un artista
+    Function GetArtistData(artistId As Integer) As Dictionary(Of String, Object)
+        Try
+            Dim schema As New Dictionary(Of String, Object) From {
+                {"artistId", artistId},
+                {"artisticName", Nothing},
+                {"artisticBiography", Nothing},
+                {"artisticEmail", Nothing},
+                {"artisticImage", Nothing},
+                {"socialMediaUrl", Nothing},
+                {"registrationDate", Nothing},
+                {"userId", Nothing},
+                {"owner_songs", New List(Of Integer)},
+                {"owner_albums", New List(Of Integer)},
+                {"owner_merch", New List(Of Integer)}
+            }
+
+            ' Recuperar datos del artista
+            Using cmd = db.CreateCommand("SELECT nombre, imagen, bio, fechainicio, email, socialmediaurl, userid FROM artistas WHERE idartista = @id")
+                cmd.Parameters.AddWithValue("@id", artistId)
+                Using reader = cmd.ExecuteReader()
+                    If reader.HasRows Then
+                        While reader.Read()
+                            schema("artisticName") = reader.GetString(0)
+                            schema("artisticImage") = reader.GetString(1)
+                            schema("artisticBiography") = reader.GetString(2)
+                            schema("registrationDate") = reader.GetDateTime(3).ToString("yyyy-MM-dd")
+                            schema("artisticEmail") = If(reader.IsDBNull(4), Nothing, reader.GetString(4))
+                            schema("socialMediaUrl") = If(reader.IsDBNull(5), Nothing, reader.GetString(5))
+                            schema("userId") = If(reader.IsDBNull(6), Nothing, CType(reader.GetInt32(6), Object))
+                        End While
+                    Else
+                        Return Nothing
+                    End If
+                End Using
+            End Using
+
+            ' Obtener canciones donde el artista es creador principal (ft=false)
+            Dim ownerSongs As New List(Of Integer)
+            Using cmd = db.CreateCommand("SELECT idcancion FROM autorescanciones WHERE idartista = @id AND ft = false")
+                cmd.Parameters.AddWithValue("@id", artistId)
+                Using reader = cmd.ExecuteReader()
+                    While reader.Read()
+                        ownerSongs.Add(reader.GetInt32(0))
+                    End While
+                End Using
+            End Using
+            schema("owner_songs") = ownerSongs
+
+            ' Obtener álbumes donde el artista es creador principal (ft=false)
+            Dim ownerAlbums As New List(Of Integer)
+            Using cmd = db.CreateCommand("SELECT idalbum FROM autoresalbumes WHERE idartista = @id AND ft = false")
+                cmd.Parameters.AddWithValue("@id", artistId)
+                Using reader = cmd.ExecuteReader()
+                    While reader.Read()
+                        ownerAlbums.Add(reader.GetInt32(0))
+                    End While
+                End Using
+            End Using
+            schema("owner_albums") = ownerAlbums
+
+            ' Obtener merchandising asociado al artista
+            Dim ownerMerch As New List(Of Integer)
+            Using cmd = db.CreateCommand("SELECT idmerch FROM AutoresMerch WHERE idartista = @id")
+                cmd.Parameters.AddWithValue("@id", artistId)
+                Using reader = cmd.ExecuteReader()
+                    While reader.Read()
+                        ownerMerch.Add(reader.GetInt32(0))
+                    End While
+                End Using
+            End Using
+            schema("owner_merch") = ownerMerch
+
+            Return schema
+
+        Catch ex As Exception
+            Console.WriteLine($"Error al obtener datos de artista {artistId}: {ex.Message}")
+            Return Nothing
+        End Try
+    End Function
 
     Sub getArtist(request As HttpListenerRequest, action As String, ByRef jsonResponse As String, ByRef statusCode As Integer)
         Try
