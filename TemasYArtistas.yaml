@@ -268,6 +268,15 @@ paths:
             type: string
             enum: [asc, desc]
           example: "asc"
+        - name: page
+          in: query
+          description: Page number for pagination (1-indexed, limit is 9 items per page)
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          example: 1
       responses:
         '200':
           description: Successful operation
@@ -524,6 +533,15 @@ paths:
             type: string
             enum: [asc, desc]
           example: "asc"
+        - name: page
+          in: query
+          description: Page number for pagination (1-indexed, limit is 9 items per page)
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          example: 1
       responses:
         '200':
           description: Successful operation
@@ -780,6 +798,15 @@ paths:
             type: string
             enum: [asc, desc]
           example: "asc"
+        - name: page
+          in: query
+          description: Page number for pagination (1-indexed, limit is 9 items per page)
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          example: 1
       responses:
         '200':
           description: Successful operation
@@ -1036,6 +1063,15 @@ paths:
             type: string
             enum: [asc, desc]
           example: "asc"
+        - name: page
+          in: query
+          description: Page number for pagination (1-indexed, limit is 9 items per page)
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          example: 1
       responses:
         '200':
           description: Successful operation

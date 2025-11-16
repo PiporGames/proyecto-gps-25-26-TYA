@@ -595,13 +595,20 @@ Module Program
             Dim artistsParam As String = request.QueryString("artists")
             Dim orderParam As String = request.QueryString("order")
             Dim directionParam As String = request.QueryString("direction")
+            Dim pageParam As String = request.QueryString("page")
 
-            ' Validar que al menos un filtro esté presente
-            If String.IsNullOrEmpty(genresParam) AndAlso String.IsNullOrEmpty(artistsParam) Then
-                jsonResponse = GenerateErrorResponse("400", "Se requiere al menos un parámetro de filtro (genres o artists)")
-                statusCode = HttpStatusCode.BadRequest
-                Return
+            ' Límite fijo de 9 elementos por página
+            Const pageLimit As Integer = 9
+
+            ' Parsear página (por defecto 1)
+            Dim pageNumber As Integer = 1
+            If Not String.IsNullOrEmpty(pageParam) Then
+                Integer.TryParse(pageParam, pageNumber)
+                If pageNumber < 1 Then pageNumber = 1
             End If
+
+            ' Calcular OFFSET
+            Dim offset As Integer = (pageNumber - 1) * pageLimit
 
             ' Parsear géneros
             Dim genreIds As New List(Of Integer)
@@ -668,12 +675,15 @@ Module Program
                 sqlQuery &= "ASC"
             End If
 
+            ' Añadir paginación
+            sqlQuery &= $" LIMIT {pageLimit} OFFSET {offset}"
+
             ' Ejecutar query
-            Dim results As New List(Of Dictionary(Of String, Object))
+            Dim results As New List(Of Integer)
             Using cmd = db.CreateCommand(sqlQuery)
                 Using reader = cmd.ExecuteReader()
                     While reader.Read()
-                        results.Add(New Dictionary(Of String, Object) From {{"songId", reader.GetInt32(0)}})
+                        results.Add(reader.GetInt32(0))
                     End While
                 End Using
             End Using
@@ -1228,13 +1238,20 @@ Module Program
             Dim artistsParam As String = request.QueryString("artists")
             Dim orderParam As String = request.QueryString("order")
             Dim directionParam As String = request.QueryString("direction")
+            Dim pageParam As String = request.QueryString("page")
 
-            ' Validar que al menos un filtro esté presente
-            If String.IsNullOrEmpty(genresParam) AndAlso String.IsNullOrEmpty(artistsParam) Then
-                jsonResponse = GenerateErrorResponse("400", "Se requiere al menos un parámetro de filtro (genres o artists)")
-                statusCode = HttpStatusCode.BadRequest
-                Return
+            ' Límite fijo de 9 elementos por página
+            Const pageLimit As Integer = 9
+
+            ' Parsear página (por defecto 1)
+            Dim pageNumber As Integer = 1
+            If Not String.IsNullOrEmpty(pageParam) Then
+                Integer.TryParse(pageParam, pageNumber)
+                If pageNumber < 1 Then pageNumber = 1
             End If
+
+            ' Calcular OFFSET
+            Dim offset As Integer = (pageNumber - 1) * pageLimit
 
             ' Parsear géneros
             Dim genreIds As New List(Of Integer)
@@ -1302,12 +1319,17 @@ Module Program
                 sqlQuery &= "ASC"
             End If
 
+            ' Añadir paginación solo si se especifica el parámetro page
+            If Not String.IsNullOrEmpty(pageParam) Then
+                sqlQuery &= $" LIMIT {pageLimit} OFFSET {offset}"
+            End If
+
             ' Ejecutar query
-            Dim results As New List(Of Dictionary(Of String, Object))
+            Dim results As New List(Of Integer)
             Using cmd = db.CreateCommand(sqlQuery)
                 Using reader = cmd.ExecuteReader()
                     While reader.Read()
-                        results.Add(New Dictionary(Of String, Object) From {{"albumId", reader.GetInt32(0)}})
+                        results.Add(reader.GetInt32(0))
                     End While
                 End Using
             End Using
@@ -1816,22 +1838,31 @@ Module Program
             Dim artistsParam As String = request.QueryString("artists")
             Dim orderParam As String = request.QueryString("order")
             Dim directionParam As String = request.QueryString("direction")
+            Dim pageParam As String = request.QueryString("page")
 
-            ' Validar que al menos un filtro esté presente
-            If String.IsNullOrEmpty(artistsParam) Then
-                jsonResponse = GenerateErrorResponse("400", "Se requiere el parámetro 'artists' para filtrar merchandising")
-                statusCode = HttpStatusCode.BadRequest
-                Return
+            ' Límite fijo de 9 elementos por página
+            Const pageLimit As Integer = 9
+
+            ' Parsear página (por defecto 1)
+            Dim pageNumber As Integer = 1
+            If Not String.IsNullOrEmpty(pageParam) Then
+                Integer.TryParse(pageParam, pageNumber)
+                If pageNumber < 1 Then pageNumber = 1
             End If
+
+            ' Calcular OFFSET
+            Dim offset As Integer = (pageNumber - 1) * pageLimit
 
             ' Parsear artistas
             Dim artistIds As New List(Of Integer)
-            For Each artistStr In artistsParam.Split(","c)
-                Dim artistId As Integer
-                If Integer.TryParse(artistStr.Trim(), artistId) Then
-                    artistIds.Add(artistId)
-                End If
-            Next
+            If Not String.IsNullOrEmpty(artistsParam) Then
+                For Each artistStr In artistsParam.Split(","c)
+                    Dim artistId As Integer
+                    If Integer.TryParse(artistStr.Trim(), artistId) Then
+                        artistIds.Add(artistId)
+                    End If
+                Next
+            End If
 
             ' Construir query SQL
             Dim orderField As String = "m.idmerch"
@@ -1846,9 +1877,15 @@ Module Program
             End If
 
             ' SELECT con el campo de ordenamiento para evitar error con DISTINCT
-            Dim sqlQuery As String = $"SELECT DISTINCT m.idmerch, {orderField} FROM merch m " &
-                                    "INNER JOIN AutoresMerch am ON m.idmerch = am.idmerch " &
-                                    "WHERE am.idartista IN (" & String.Join(",", artistIds) & ") "
+            Dim sqlQuery As String = ""
+            If artistIds.Count > 0 Then
+                sqlQuery = $"SELECT DISTINCT m.idmerch, {orderField} FROM merch m " &
+                                        "INNER JOIN AutoresMerch am ON m.idmerch = am.idmerch " &
+                                        "WHERE am.idartista IN (" & String.Join(",", artistIds) & ") "
+            Else
+                ' Sin filtro de artistas, devolver todos
+                sqlQuery = $"SELECT m.idmerch, {orderField} FROM merch m "
+            End If
 
             ' Agregar ORDER BY
             sqlQuery &= $"ORDER BY {orderField} "
@@ -1860,12 +1897,17 @@ Module Program
                 sqlQuery &= "ASC"
             End If
 
+            ' Añadir paginación solo si se especifica el parámetro page
+            If Not String.IsNullOrEmpty(pageParam) Then
+                sqlQuery &= $" LIMIT {pageLimit} OFFSET {offset}"
+            End If
+
             ' Ejecutar query
-            Dim results As New List(Of Dictionary(Of String, Object))
+            Dim results As New List(Of Integer)
             Using cmd = db.CreateCommand(sqlQuery)
                 Using reader = cmd.ExecuteReader()
                     While reader.Read()
-                        results.Add(New Dictionary(Of String, Object) From {{"merchId", reader.GetInt32(0)}})
+                        results.Add(reader.GetInt32(0))
                     End While
                 End Using
             End Using
@@ -2249,22 +2291,31 @@ Module Program
             Dim genresParam As String = request.QueryString("genres")
             Dim orderParam As String = request.QueryString("order")
             Dim directionParam As String = request.QueryString("direction")
+            Dim pageParam As String = request.QueryString("page")
 
-            ' Validar que al menos un filtro esté presente
-            If String.IsNullOrEmpty(genresParam) Then
-                jsonResponse = GenerateErrorResponse("400", "Se requiere el parámetro 'genres' para filtrar artistas")
-                statusCode = HttpStatusCode.BadRequest
-                Return
+            ' Límite fijo de 9 elementos por página
+            Const pageLimit As Integer = 9
+
+            ' Parsear página (por defecto 1)
+            Dim pageNumber As Integer = 1
+            If Not String.IsNullOrEmpty(pageParam) Then
+                Integer.TryParse(pageParam, pageNumber)
+                If pageNumber < 1 Then pageNumber = 1
             End If
+
+            ' Calcular OFFSET
+            Dim offset As Integer = (pageNumber - 1) * pageLimit
 
             ' Parsear géneros
             Dim genreIds As New List(Of Integer)
-            For Each genreStr In genresParam.Split(","c)
-                Dim genreId As Integer
-                If Integer.TryParse(genreStr.Trim(), genreId) Then
-                    genreIds.Add(genreId)
-                End If
-            Next
+            If Not String.IsNullOrEmpty(genresParam) Then
+                For Each genreStr In genresParam.Split(","c)
+                    Dim genreId As Integer
+                    If Integer.TryParse(genreStr.Trim(), genreId) Then
+                        genreIds.Add(genreId)
+                    End If
+                Next
+            End If
 
             ' Construir query SQL - buscar artistas que tengan canciones con esos géneros
             Dim orderField As String = "a.idartista"
@@ -2279,10 +2330,16 @@ Module Program
             End If
 
             ' SELECT con el campo de ordenamiento para evitar error con DISTINCT
-            Dim sqlQuery As String = $"SELECT DISTINCT a.idartista, {orderField} FROM artistas a " &
-                                    "INNER JOIN autorescanciones ac ON a.idartista = ac.idartista " &
-                                    "INNER JOIN generoscanciones gc ON ac.idcancion = gc.idcancion " &
-                                    "WHERE gc.idgenero IN (" & String.Join(",", genreIds) & ") "
+            Dim sqlQuery As String = ""
+            If genreIds.Count > 0 Then
+                sqlQuery = $"SELECT DISTINCT a.idartista, {orderField} FROM artistas a " &
+                                        "INNER JOIN autorescanciones ac ON a.idartista = ac.idartista " &
+                                        "INNER JOIN generoscanciones gc ON ac.idcancion = gc.idcancion " &
+                                        "WHERE gc.idgenero IN (" & String.Join(",", genreIds) & ") "
+            Else
+                ' Sin filtro de géneros, devolver todos los artistas
+                sqlQuery = $"SELECT a.idartista, {orderField} FROM artistas a "
+            End If
 
             ' Agregar ORDER BY
             sqlQuery &= $"ORDER BY {orderField} "
@@ -2294,12 +2351,17 @@ Module Program
                 sqlQuery &= "ASC"
             End If
 
+            ' Añadir paginación solo si se especifica el parámetro page
+            If Not String.IsNullOrEmpty(pageParam) Then
+                sqlQuery &= $" LIMIT {pageLimit} OFFSET {offset}"
+            End If
+
             ' Ejecutar query
-            Dim results As New List(Of Dictionary(Of String, Object))
+            Dim results As New List(Of Integer)
             Using cmd = db.CreateCommand(sqlQuery)
                 Using reader = cmd.ExecuteReader()
                     While reader.Read()
-                        results.Add(New Dictionary(Of String, Object) From {{"artistId", reader.GetInt32(0)}})
+                        results.Add(reader.GetInt32(0))
                     End While
                 End Using
             End Using

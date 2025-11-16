@@ -285,13 +285,13 @@ def test_filter_songs():
             pass
     
     if song_id:
-        # Filtrar por género
+        # Filtrar por género - solo verificar que el endpoint funciona
         success, response = make_request("GET", "/song/filter?genres=1", expected_status=200, requires_auth=False)
         if success and response:
             try:
                 results = response.json()
-                song_in_results = any(item.get("songId") == song_id for item in results)
-                print_result(song_in_results, f"Canción encontrada en filtro por género")
+                # Verificar que devuelve resultados (puede haber muchas canciones con género 1)
+                print_result(len(results) > 0, f"Filtro por género devuelve resultados: {len(results)} canciones")
             except Exception as e:
                 print_result(False, f"Error al parsear respuesta: {e}")
         else:
@@ -307,11 +307,224 @@ def test_filter_songs():
         print_result(False, "No se pudo crear canción para la prueba")
 
 def test_filter_songs_missing_param():
-    """Prueba filter sin parámetros"""
-    print_test_header("GET /song/filter - Validación sin parámetros")
+    """Prueba filter sin parámetros (ahora debe funcionar y devolver todos)"""
+    print_test_header("GET /song/filter - Sin parámetros (devuelve todos)")
     
-    success, response = make_request("GET", "/song/filter", expected_status=400, requires_auth=False)
-    print_result(success, f"Validación sin parámetros - Status: {response.status_code if response else 'N/A'}")
+    success, response = make_request("GET", "/song/filter", expected_status=200, requires_auth=False)
+    if success and response:
+        try:
+            results = response.json()
+            print_result(True, f"Sin parámetros devuelve todos - {len(results)} canciones - Status: {response.status_code}")
+        except:
+            print_result(False, f"Error al parsear respuesta")
+    else:
+        print_result(False, f"Error - Status: {response.status_code if response else 'N/A'}")
+
+def test_filter_songs_pagination():
+    """Prueba paginación en /song/filter"""
+    print_test_header("GET /song/filter - Paginación")
+    
+    # Crear más de 9 canciones para probar paginación
+    song_ids = []
+    print("  → Creando 12 canciones para probar paginación...")
+    for i in range(12):
+        song_data = {
+            "title": f"Pagination Test Song {i+1}",
+            "genres": [1],
+            "cover": "data:image/png;base64,test",
+            "price": 4.99,
+            "trackId": 750000 + i,
+            "duration": 180
+        }
+        success, response = make_request("POST", "/song/upload", song_data, 200)
+        if success and response:
+            try:
+                song_id = response.json().get("songId")
+                song_ids.append(song_id)
+            except:
+                pass
+    
+    if len(song_ids) >= 12:
+        # Página 1 - debe devolver 9 resultados
+        success, response = make_request("GET", "/song/filter?genres=1&page=1", expected_status=200, requires_auth=False)
+        if success and response:
+            try:
+                page1_results = response.json()
+                print_result(len(page1_results) == 9, f"Página 1: {len(page1_results)} resultados (esperado: 9)")
+            except:
+                print_result(False, "Error al parsear página 1")
+        
+        # Página 2 - debe devolver entre 1 y 9 resultados (hay más canciones en BD)
+        success, response = make_request("GET", "/song/filter?genres=1&page=2", expected_status=200, requires_auth=False)
+        if success and response:
+            try:
+                page2_results = response.json()
+                print_result(1 <= len(page2_results) <= 9, f"Página 2: {len(page2_results)} resultados (esperado: 1-9)")
+            except:
+                print_result(False, "Error al parsear página 2")
+        
+        # Verificar que con paginación alta devuelve vacío
+        success, response = make_request("GET", "/song/filter?genres=1&page=999", expected_status=200, requires_auth=False)
+        if success and response:
+            try:
+                page_high_results = response.json()
+                print_result(len(page_high_results) == 0, f"Página 999: {len(page_high_results)} resultados (esperado: 0)")
+            except:
+                print_result(False, "Error al parsear página alta")
+        
+        # Sin página (por defecto página 1)
+        success, response = make_request("GET", "/song/filter?genres=1", expected_status=200, requires_auth=False)
+        if success and response:
+            try:
+                default_results = response.json()
+                print_result(len(default_results) == 9, f"Sin page (default): {len(default_results)} resultados (esperado: 9)")
+            except:
+                print_result(False, "Error al parsear sin page")
+    else:
+        print_result(False, f"Solo se crearon {len(song_ids)} canciones, se necesitan al menos 12")
+    
+    # Limpiar
+    for song_id in song_ids:
+        make_request("DELETE", f"/song/{song_id}")
+
+def test_filter_albums_pagination():
+    """Prueba paginación en /album/filter"""
+    print_test_header("GET /album/filter - Paginación")
+    
+    # Crear canciones y álbumes para probar
+    song_ids = []
+    album_ids = []
+    
+    print("  → Creando 10 álbumes para probar paginación...")
+    for i in range(10):
+        # Crear canción con género
+        song_data = {
+            "title": f"Album Pagination Song {i+1}",
+            "genres": [1],
+            "cover": "data:image/png;base64,test",
+            "price": 3.99,
+            "trackId": 760000 + i,
+            "duration": 180
+        }
+        success, response = make_request("POST", "/song/upload", song_data, 200)
+        song_id = None
+        if success and response:
+            try:
+                song_id = response.json().get("songId")
+                song_ids.append(song_id)
+            except:
+                pass
+        
+        # Crear álbum con la canción
+        if song_id:
+            album_data = {
+                "title": f"Pagination Album {i+1}",
+                "songs": [song_id],
+                "cover": "data:image/png;base64,test",
+                "price": 12.99
+            }
+            success, response = make_request("POST", "/album/upload", album_data, 200)
+            if success and response:
+                try:
+                    album_id = response.json().get("albumId")
+                    album_ids.append(album_id)
+                except:
+                    pass
+    
+    if len(album_ids) >= 10:
+        # Página 1 - debe devolver 9 resultados
+        success, response = make_request("GET", "/album/filter?genres=1&page=1", expected_status=200, requires_auth=False)
+        if success and response:
+            try:
+                page1_results = response.json()
+                print_result(len(page1_results) == 9, f"Página 1: {len(page1_results)} resultados (esperado: 9)")
+            except:
+                print_result(False, "Error al parsear página 1")
+        
+        # Página 2 - debe devolver entre 1 y 9 resultados (hay más álbumes en BD)
+        success, response = make_request("GET", "/album/filter?genres=1&page=2", expected_status=200, requires_auth=False)
+        if success and response:
+            try:
+                page2_results = response.json()
+                print_result(1 <= len(page2_results) <= 9, f"Página 2: {len(page2_results)} resultados (esperado: 1-9)")
+            except:
+                print_result(False, "Error al parsear página 2")
+    else:
+        print_result(False, f"Solo se crearon {len(album_ids)} álbumes, se necesitan al menos 10")
+    
+    # Limpiar
+    for album_id in album_ids:
+        make_request("DELETE", f"/album/{album_id}")
+    for song_id in song_ids:
+        make_request("DELETE", f"/song/{song_id}")
+
+def test_filter_merch_pagination():
+    """Prueba paginación en /merch/filter"""
+    print_test_header("GET /merch/filter - Paginación")
+    
+    # Crear merchandising
+    merch_ids = []
+    print("  → Creando 10 merchandising para probar paginación...")
+    for i in range(10):
+        merch_data = {
+            "title": f"Pagination Merch {i+1}",
+            "description": "Test",
+            "cover": "data:image/png;base64,test",
+            "price": 25.00
+        }
+        success, response = make_request("POST", "/merch/upload", merch_data, 200)
+        if success and response:
+            try:
+                merch_id = response.json().get("merchId")
+                merch_ids.append(merch_id)
+            except:
+                pass
+    
+    if len(merch_ids) >= 10:
+        # Página 1 - debe devolver 9 resultados
+        success, response = make_request("GET", "/merch/filter?page=1", expected_status=200, requires_auth=False)
+        if success and response:
+            try:
+                page1_results = response.json()
+                print_result(len(page1_results) == 9, f"Página 1: {len(page1_results)} resultados (esperado: 9)")
+            except:
+                print_result(False, "Error al parsear página 1")
+        
+        # Página 2
+        success, response = make_request("GET", "/merch/filter?page=2", expected_status=200, requires_auth=False)
+        if success and response:
+            try:
+                page2_results = response.json()
+                print_result(len(page2_results) >= 1, f"Página 2: {len(page2_results)} resultados")
+            except:
+                print_result(False, "Error al parsear página 2")
+    else:
+        print_result(False, f"Solo se crearon {len(merch_ids)} merchandising")
+    
+    # Limpiar
+    for merch_id in merch_ids:
+        make_request("DELETE", f"/merch/{merch_id}")
+
+def test_filter_artists_pagination():
+    """Prueba paginación en /artist/filter"""
+    print_test_header("GET /artist/filter - Paginación")
+    
+    # Probar paginación con artistas existentes
+    success, response = make_request("GET", "/artist/filter?page=1", expected_status=200, requires_auth=False)
+    if success and response:
+        try:
+            page1_results = response.json()
+            print_result(True, f"Página 1: {len(page1_results)} artistas (máximo 9)")
+        except:
+            print_result(False, "Error al parsear página 1")
+    
+    success, response = make_request("GET", "/artist/filter?page=2", expected_status=200, requires_auth=False)
+    if success and response:
+        try:
+            page2_results = response.json()
+            print_result(True, f"Página 2: {len(page2_results)} artistas")
+        except:
+            print_result(False, "Error al parsear página 2")
 
 def test_upload_song():
     """Prueba crear una nueva canción"""
@@ -1288,6 +1501,7 @@ def main():
     
     test_list_albums()
     test_filter_albums()
+    test_filter_albums_pagination()
     
     # =========================================================================
     # SECCIÓN 3: SONG SINGLE - Crear canción sin álbum y probar
@@ -1320,6 +1534,7 @@ def main():
     test_list_songs_missing_param()
     test_filter_songs()
     test_filter_songs_missing_param()
+    test_filter_songs_pagination()
     
     # =========================================================================
     # SECCIÓN 4: SONG con albumId desde creación
@@ -1499,6 +1714,7 @@ def main():
     
     test_list_merch()
     test_filter_merch()
+    test_filter_merch_pagination()
     
     # =========================================================================
     # SECCIÓN 7: Verificar campos owner_* en Artist
@@ -1634,6 +1850,7 @@ def main():
     
     test_list_artists()
     test_filter_artists()
+    test_filter_artists_pagination()
     
     # =========================================================================
     # PRUEBAS ADICIONALES
