@@ -82,6 +82,12 @@ Module Program
             Dim resource As String = If(URLpath.Length > 1, URLpath(1), "")
             Dim action As String = If(URLpath.Length > 2, URLpath(2), "")
 
+            ' Servir archivos estáticos desde /static
+            If resource = "static" AndAlso request.HttpMethod = "GET" Then
+                ServeStaticFile(request, response)
+                Return
+            End If
+
             ' Verificar si el endpoint requiere autenticación
             ' Todos los endpoints GET no requieren autenticación
             ' Solo POST, PATCH, DELETE requieren autenticación
@@ -385,7 +391,7 @@ Module Program
             ' Obtener valores
             Dim title As String = songData("title").GetString()
             Dim description As String = If(songData.ContainsKey("description") AndAlso songData("description").ValueKind <> JsonValueKind.Null, songData("description").GetString(), Nothing)
-            Dim cover As String = songData("cover").GetString()
+            Dim cover As String = If(songData.ContainsKey("cover") AndAlso songData("cover").ValueKind <> JsonValueKind.Null AndAlso Not String.IsNullOrWhiteSpace(songData("cover").GetString()), songData("cover").GetString(), Nothing)
             Dim price As Decimal = songData("price").GetDecimal()
             Dim albumId As Integer? = If(songData.ContainsKey("albumId") AndAlso songData("albumId").ValueKind <> JsonValueKind.Null, CType(songData("albumId").GetInt32(), Integer?), Nothing)
             Dim albumOrder As Integer? = If(songData.ContainsKey("albumOrder") AndAlso songData("albumOrder").ValueKind <> JsonValueKind.Null, CType(songData("albumOrder").GetInt32(), Integer?), Nothing)
@@ -429,12 +435,12 @@ Module Program
                 End If
             End If
 
-            ' Insertar canción con albumog (el álbum original)
+            ' Insertar canción con albumog (el álbum original) con cover por defecto
             Dim newSongId As Integer
             Using cmd = db.CreateCommand("INSERT INTO canciones (titulo, descripcion, cover, track, duracion, fechalanzamiento, precio, albumog) VALUES (@titulo, @descripcion, @cover, @track, @duracion, @fecha, @precio, @albumog) RETURNING idcancion")
                 cmd.Parameters.AddWithValue("@titulo", title)
                 cmd.Parameters.AddWithValue("@descripcion", If(description, DBNull.Value))
-                cmd.Parameters.AddWithValue("@cover", StringToBytes(cover))
+                cmd.Parameters.AddWithValue("@cover", "/song/default.png")
                 cmd.Parameters.AddWithValue("@track", trackId)
                 cmd.Parameters.AddWithValue("@duracion", duration)
                 cmd.Parameters.AddWithValue("@fecha", Date.Parse(releaseDate))
@@ -442,6 +448,18 @@ Module Program
                 cmd.Parameters.AddWithValue("@albumog", If(albumId.HasValue, CType(albumId.Value, Object), DBNull.Value))
                 newSongId = CInt(cmd.ExecuteScalar())
             End Using
+
+            ' Guardar imagen y actualizar cover con la ruta si se proporcionó
+            If cover IsNot Nothing Then
+                Dim coverPath As String = SaveBase64Image(cover, "song", newSongId)
+                If coverPath IsNot Nothing Then
+                    Using cmd = db.CreateCommand("UPDATE canciones SET cover = @cover WHERE idcancion = @id")
+                        cmd.Parameters.AddWithValue("@cover", coverPath)
+                        cmd.Parameters.AddWithValue("@id", newSongId)
+                        cmd.ExecuteNonQuery()
+                    End Using
+                End If
+            End If
 
             ' Obtener el ID del artista asociado al usuario autenticado
             Dim artistId As Integer? = GetArtistIdByUserId(userId)
@@ -464,7 +482,7 @@ Module Program
             If songData.ContainsKey("genres") Then
                 For Each genreElement In songData("genres").EnumerateArray()
                     Dim genreId As Integer = genreElement.GetInt32()
-                    
+
                     ' Validar que el género exista
                     Dim genreExists As Boolean = False
                     Using cmd = db.CreateCommand("SELECT COUNT(*) FROM generos WHERE idgenero = @idgenero")
@@ -478,7 +496,7 @@ Module Program
                         statusCode = 422 ' Unprocessable Entity
                         Return
                     End If
-                    
+
                     Using cmd = db.CreateCommand("INSERT INTO generoscanciones (idcancion, idgenero) VALUES (@idcancion, @idgenero)")
                         cmd.Parameters.AddWithValue("@idcancion", newSongId)
                         cmd.Parameters.AddWithValue("@idgenero", genreId)
@@ -740,8 +758,7 @@ Module Program
                         While reader.Read()
                             schema("title") = reader.GetString(0)
                             schema("description") = If(reader.IsDBNull(1), Nothing, reader.GetString(1))
-                            Dim coverBytes As Byte() = CType(reader("cover"), Byte())
-                            schema("cover") = BytesToString(coverBytes)
+                            schema("cover") = GetImagePath(reader("cover"))
                             schema("duration") = reader.GetInt32(3).ToString()
                             schema("releaseDate") = reader.GetDateTime(4).ToString("yyyy-MM-dd")
                             schema("price") = reader.GetDecimal(5).ToString()
@@ -853,8 +870,7 @@ Module Program
                         schema("songId") = action
                         schema("title") = reader.GetString(0)
                         schema("description") = If(reader.IsDBNull(1), Nothing, reader.GetString(1))
-                        Dim coverBytes As Byte() = CType(reader("cover"), Byte())
-                        schema("cover") = BytesToString(coverBytes)
+                        schema("cover") = GetImagePath(reader("cover"))
                         schema("duration") = reader.GetInt32(3).ToString()
                         schema("releaseDate") = reader.GetDateTime(4).ToString("yyyy-MM-dd")
                         schema("price") = reader.GetDecimal(5).ToString()
@@ -942,6 +958,16 @@ Module Program
 
             Dim songId As Integer = Integer.Parse(action)
 
+            ' Obtener la ruta de la imagen antes de eliminar el registro
+            Dim coverPath As String = Nothing
+            Using cmd = db.CreateCommand("SELECT cover FROM canciones WHERE idcancion = @id")
+                cmd.Parameters.AddWithValue("@id", songId)
+                Dim result As Object = cmd.ExecuteScalar()
+                If result IsNot Nothing AndAlso Not IsDBNull(result) Then
+                    coverPath = result.ToString()
+                End If
+            End Using
+
             ' Eliminar canción (las relaciones se eliminan en cascada)
             Using cmd = db.CreateCommand("DELETE FROM canciones WHERE idcancion = @id")
                 cmd.Parameters.AddWithValue("@id", songId)
@@ -951,6 +977,11 @@ Module Program
                     jsonResponse = GenerateErrorResponse("404", "Canción no encontrada")
                     statusCode = HttpStatusCode.NotFound
                 Else
+                    ' Eliminar archivo de imagen si existe
+                    If coverPath IsNot Nothing Then
+                        DeleteImageFile(coverPath)
+                    End If
+
                     jsonResponse = ""
                     statusCode = HttpStatusCode.OK
                 End If
@@ -1005,8 +1036,27 @@ Module Program
                     cmd.Parameters.AddWithValue("@descripcion", If(songData("description").ValueKind = JsonValueKind.Null, DBNull.Value, CType(songData("description").GetString(), Object)))
                 End If
                 If songData.ContainsKey("cover") Then
-                    updates.Add("cover = @cover")
-                    cmd.Parameters.AddWithValue("@cover", StringToBytes(songData("cover").GetString()))
+                    ' Obtener la ruta anterior para eliminar el archivo viejo
+                    Dim oldCoverPath As String = Nothing
+                    Using cmdOld = db.CreateCommand("SELECT cover FROM canciones WHERE idcancion = @id")
+                        cmdOld.Parameters.AddWithValue("@id", songId)
+                        Dim result As Object = cmdOld.ExecuteScalar()
+                        If result IsNot Nothing AndAlso Not IsDBNull(result) Then
+                            oldCoverPath = result.ToString()
+                        End If
+                    End Using
+
+                    ' Guardar nueva imagen y obtener ruta
+                    Dim newCoverPath As String = SaveBase64Image(songData("cover").GetString(), "song", songId)
+                    If newCoverPath IsNot Nothing Then
+                        updates.Add("cover = @cover")
+                        cmd.Parameters.AddWithValue("@cover", newCoverPath)
+
+                        ' Eliminar archivo viejo si existe y es diferente
+                        If oldCoverPath IsNot Nothing AndAlso oldCoverPath <> newCoverPath Then
+                            DeleteImageFile(oldCoverPath)
+                        End If
+                    End If
                 End If
                 If songData.ContainsKey("price") Then
                     updates.Add("precio = @precio")
@@ -1122,7 +1172,7 @@ Module Program
             End If
 
             Dim title As String = albumData("title").GetString()
-            Dim cover As String = albumData("cover").GetString()
+            Dim cover As String = If(albumData.ContainsKey("cover") AndAlso albumData("cover").ValueKind <> JsonValueKind.Null AndAlso Not String.IsNullOrWhiteSpace(albumData("cover").GetString()), albumData("cover").GetString(), Nothing)
             Dim price As Decimal = albumData("price").GetDecimal()
             Dim releaseDate As String = If(albumData.ContainsKey("releaseDate"), albumData("releaseDate").GetString(), DateTime.Now.ToString("yyyy-MM-dd"))
             Dim description As String = If(albumData.ContainsKey("description"), albumData("description").GetString(), "")
@@ -1153,17 +1203,29 @@ Module Program
                 Next
             End If
 
-            ' Insertar álbum
+            ' Insertar álbum con cover por defecto
             Dim newAlbumId As Integer
             Using cmd = db.CreateCommand("INSERT INTO albumes (titulo, descripcion, cover, fechalanzamiento, precio, precioauto) VALUES (@titulo, @descripcion, @cover, @fecha, @precio, @precioauto) RETURNING idalbum")
                 cmd.Parameters.AddWithValue("@titulo", title)
                 cmd.Parameters.AddWithValue("@descripcion", If(description, DBNull.Value))
-                cmd.Parameters.AddWithValue("@cover", StringToBytes(cover))
+                cmd.Parameters.AddWithValue("@cover", "/album/default.png")
                 cmd.Parameters.AddWithValue("@fecha", Date.Parse(releaseDate))
                 cmd.Parameters.AddWithValue("@precio", price)
                 cmd.Parameters.AddWithValue("@precioauto", False)
                 newAlbumId = CInt(cmd.ExecuteScalar())
             End Using
+
+            ' Guardar imagen y actualizar cover con la ruta si se proporcionó
+            If cover IsNot Nothing Then
+                Dim coverPath As String = SaveBase64Image(cover, "album", newAlbumId)
+                If coverPath IsNot Nothing Then
+                    Using cmd = db.CreateCommand("UPDATE albumes SET cover = @cover WHERE idalbum = @id")
+                        cmd.Parameters.AddWithValue("@cover", coverPath)
+                        cmd.Parameters.AddWithValue("@id", newAlbumId)
+                        cmd.ExecuteNonQuery()
+                    End Using
+                End If
+            End If
 
             ' Obtener el ID del artista asociado al usuario autenticado
             Dim artistId As Integer? = GetArtistIdByUserId(userId)
@@ -1429,8 +1491,7 @@ Module Program
                         While reader.Read()
                             schema("title") = reader.GetString(0)
                             schema("description") = If(reader.IsDBNull(1), "", reader.GetString(1))
-                            Dim coverBytes As Byte() = CType(reader("cover"), Byte())
-                            schema("cover") = Convert.ToBase64String(coverBytes)
+                            schema("cover") = GetImagePath(reader("cover"))
                             schema("releaseDate") = reader.GetDateTime(3).ToString("yyyy-MM-dd")
                             schema("price") = reader.GetDecimal(4).ToString()
                         End While
@@ -1518,8 +1579,7 @@ Module Program
                             schema("albumId") = action
                             schema("title") = reader.GetString(0)
                             schema("description") = If(reader.IsDBNull(1), "", reader.GetString(1))
-                            Dim coverBytes As Byte() = CType(reader("cover"), Byte())
-                            schema("cover") = Convert.ToBase64String(coverBytes)
+                            schema("cover") = GetImagePath(reader("cover"))
                             schema("releaseDate") = reader.GetDateTime(3).ToString("yyyy-MM-dd")
                             schema("price") = reader.GetDecimal(4).ToString()
                         End While
@@ -1590,6 +1650,16 @@ Module Program
 
             Dim albumId As Integer = Integer.Parse(action)
 
+            ' Obtener la ruta de la imagen antes de eliminar el registro
+            Dim coverPath As String = Nothing
+            Using cmd = db.CreateCommand("SELECT cover FROM albumes WHERE idalbum = @id")
+                cmd.Parameters.AddWithValue("@id", albumId)
+                Dim result As Object = cmd.ExecuteScalar()
+                If result IsNot Nothing AndAlso Not IsDBNull(result) Then
+                    coverPath = result.ToString()
+                End If
+            End Using
+
             ' Antes de eliminar el álbum, poner albumog a NULL en todas las canciones
             ' que tengan este álbum como álbum original (se convierten en singles)
             Using cmd = db.CreateCommand("UPDATE canciones SET albumog = NULL WHERE albumog = @id")
@@ -1606,6 +1676,11 @@ Module Program
                     jsonResponse = GenerateErrorResponse("404", "Álbum no encontrado")
                     statusCode = HttpStatusCode.NotFound
                 Else
+                    ' Eliminar archivo de imagen si existe
+                    If coverPath IsNot Nothing Then
+                        DeleteImageFile(coverPath)
+                    End If
+
                     jsonResponse = ""
                     statusCode = HttpStatusCode.OK
                 End If
@@ -1677,8 +1752,27 @@ Module Program
                     cmd.Parameters.AddWithValue("@descripcion", If(albumData("description").ValueKind = JsonValueKind.Null, DBNull.Value, CType(albumData("description").GetString(), Object)))
                 End If
                 If albumData.ContainsKey("cover") Then
-                    updates.Add("cover = @cover")
-                    cmd.Parameters.AddWithValue("@cover", StringToBytes(albumData("cover").GetString()))
+                    ' Obtener la ruta anterior para eliminar el archivo viejo
+                    Dim oldCoverPath As String = Nothing
+                    Using cmdOld = db.CreateCommand("SELECT cover FROM albumes WHERE idalbum = @id")
+                        cmdOld.Parameters.AddWithValue("@id", albumId)
+                        Dim result As Object = cmdOld.ExecuteScalar()
+                        If result IsNot Nothing AndAlso Not IsDBNull(result) Then
+                            oldCoverPath = result.ToString()
+                        End If
+                    End Using
+
+                    ' Guardar nueva imagen y obtener ruta
+                    Dim newCoverPath As String = SaveBase64Image(albumData("cover").GetString(), "album", albumId)
+                    If newCoverPath IsNot Nothing Then
+                        updates.Add("cover = @cover")
+                        cmd.Parameters.AddWithValue("@cover", newCoverPath)
+
+                        ' Eliminar archivo viejo si existe y es diferente
+                        If oldCoverPath IsNot Nothing AndAlso oldCoverPath <> newCoverPath Then
+                            DeleteImageFile(oldCoverPath)
+                        End If
+                    End If
                 End If
                 If albumData.ContainsKey("price") Then
                     updates.Add("precio = @precio")
@@ -1764,7 +1858,7 @@ Module Program
             Dim title As String = merchData("title").GetString()
             Dim description As String = If(merchData.ContainsKey("description"), merchData("description").GetString(), "")
             Dim price As Decimal = merchData("price").GetDecimal()
-            Dim cover As String = merchData("cover").GetString()
+            Dim cover As String = If(merchData.ContainsKey("cover") AndAlso merchData("cover").ValueKind <> JsonValueKind.Null AndAlso Not String.IsNullOrWhiteSpace(merchData("cover").GetString()), merchData("cover").GetString(), Nothing)
             Dim releaseDate As String = If(merchData.ContainsKey("releaseDate"), merchData("releaseDate").GetString(), DateTime.Now.ToString("yyyy-MM-dd"))
 
             ' Validar que price sea positivo
@@ -1774,16 +1868,28 @@ Module Program
                 Return
             End If
 
-            ' Insertar merchandising
+            ' Insertar merchandising con cover por defecto
             Dim newMerchId As Integer
             Using cmd = db.CreateCommand("INSERT INTO merch (titulo, descripcion, cover, fechalanzamiento, precio) VALUES (@titulo, @descripcion, @cover, @fecha, @precio) RETURNING idmerch")
                 cmd.Parameters.AddWithValue("@titulo", title)
                 cmd.Parameters.AddWithValue("@descripcion", description)
-                cmd.Parameters.AddWithValue("@cover", StringToBytes(cover))
+                cmd.Parameters.AddWithValue("@cover", "/merch/default.png")
                 cmd.Parameters.AddWithValue("@fecha", Date.Parse(releaseDate))
                 cmd.Parameters.AddWithValue("@precio", price)
                 newMerchId = CInt(cmd.ExecuteScalar())
             End Using
+
+            ' Guardar imagen y actualizar cover con la ruta si se proporcionó
+            If cover IsNot Nothing Then
+                Dim coverPath As String = SaveBase64Image(cover, "merch", newMerchId)
+                If coverPath IsNot Nothing Then
+                    Using cmd = db.CreateCommand("UPDATE merch SET cover = @cover WHERE idmerch = @id")
+                        cmd.Parameters.AddWithValue("@cover", coverPath)
+                        cmd.Parameters.AddWithValue("@id", newMerchId)
+                        cmd.ExecuteNonQuery()
+                    End Using
+                End If
+            End If
 
             ' Obtener el ID del artista asociado al usuario autenticado
             Dim artistId As Integer? = GetArtistIdByUserId(userId)
@@ -2010,8 +2116,7 @@ Module Program
                             schema("title") = reader.GetString(0)
                             schema("description") = reader.GetString(1)
                             schema("price") = reader.GetDecimal(2).ToString()
-                            Dim coverBytes As Byte() = CType(reader("cover"), Byte())
-                            schema("cover") = Convert.ToBase64String(coverBytes)
+                            schema("cover") = GetImagePath(reader("cover"))
                             schema("releaseDate") = reader.GetDateTime(4).ToString("yyyy-MM-dd")
                         End While
                     Else
@@ -2073,8 +2178,7 @@ Module Program
                             schema("title") = reader.GetString(0)
                             schema("description") = reader.GetString(1)
                             schema("price") = reader.GetDecimal(2).ToString()
-                            Dim coverBytes As Byte() = CType(reader("cover"), Byte())
-                            schema("cover") = Convert.ToBase64String(coverBytes)
+                            schema("cover") = GetImagePath(reader("cover"))
                             schema("releaseDate") = reader.GetDateTime(4).ToString("yyyy-MM-dd")
                         End While
                     Else
@@ -2122,6 +2226,16 @@ Module Program
 
             Dim merchId As Integer = Integer.Parse(action)
 
+            ' Obtener la ruta de la imagen antes de eliminar el registro
+            Dim coverPath As String = Nothing
+            Using cmd = db.CreateCommand("SELECT cover FROM merch WHERE idmerch = @id")
+                cmd.Parameters.AddWithValue("@id", merchId)
+                Dim result As Object = cmd.ExecuteScalar()
+                If result IsNot Nothing AndAlso Not IsDBNull(result) Then
+                    coverPath = result.ToString()
+                End If
+            End Using
+
             ' Eliminar merchandising (las relaciones se eliminan en cascada)
             Using cmd = db.CreateCommand("DELETE FROM merch WHERE idmerch = @id")
                 cmd.Parameters.AddWithValue("@id", merchId)
@@ -2131,6 +2245,11 @@ Module Program
                     jsonResponse = GenerateErrorResponse("404", "Merchandising no encontrado")
                     statusCode = HttpStatusCode.NotFound
                 Else
+                    ' Eliminar archivo de imagen si existe
+                    If coverPath IsNot Nothing Then
+                        DeleteImageFile(coverPath)
+                    End If
+
                     jsonResponse = ""
                     statusCode = HttpStatusCode.OK
                 End If
@@ -2187,8 +2306,27 @@ Module Program
                     cmd.Parameters.AddWithValue("@precio", merchData("price").GetDecimal())
                 End If
                 If merchData.ContainsKey("cover") Then
-                    updates.Add("cover = @cover")
-                    cmd.Parameters.AddWithValue("@cover", StringToBytes(merchData("cover").GetString()))
+                    ' Obtener la ruta anterior para eliminar el archivo viejo
+                    Dim oldCoverPath As String = Nothing
+                    Using cmdOld = db.CreateCommand("SELECT cover FROM merch WHERE idmerch = @id")
+                        cmdOld.Parameters.AddWithValue("@id", merchId)
+                        Dim result As Object = cmdOld.ExecuteScalar()
+                        If result IsNot Nothing AndAlso Not IsDBNull(result) Then
+                            oldCoverPath = result.ToString()
+                        End If
+                    End Using
+
+                    ' Guardar nueva imagen y obtener ruta
+                    Dim newCoverPath As String = SaveBase64Image(merchData("cover").GetString(), "merch", merchId)
+                    If newCoverPath IsNot Nothing Then
+                        updates.Add("cover = @cover")
+                        cmd.Parameters.AddWithValue("@cover", newCoverPath)
+
+                        ' Eliminar archivo viejo si existe y es diferente
+                        If oldCoverPath IsNot Nothing AndAlso oldCoverPath <> newCoverPath Then
+                            DeleteImageFile(oldCoverPath)
+                        End If
+                    End If
                 End If
                 If merchData.ContainsKey("releaseDate") Then
                     updates.Add("fechalanzamiento = @fecha")
@@ -2257,11 +2395,11 @@ Module Program
             Dim socialMediaUrl As String = If(artistData.ContainsKey("socialMediaUrl"), artistData("socialMediaUrl").GetString(), Nothing)
             Dim registrationDate As String = DateTime.Now.ToString("yyyy-MM-dd")
 
-            ' Insertar artista
+            ' Insertar artista con imagen por defecto
             Dim newArtistId As Integer
             Using cmd = db.CreateCommand("INSERT INTO artistas (nombre, imagen, bio, fechainicio, email, socialmediaurl, userid) VALUES (@nombre, @imagen, @bio, @fecha, @email, @socialmediaurl, @userid) RETURNING idartista")
                 cmd.Parameters.AddWithValue("@nombre", artisticName)
-                cmd.Parameters.AddWithValue("@imagen", If(image IsNot Nothing, StringToBytes(image), DBNull.Value))
+                cmd.Parameters.AddWithValue("@imagen", "/artist/default.png")
                 cmd.Parameters.AddWithValue("@bio", biography)
                 cmd.Parameters.AddWithValue("@fecha", Date.Parse(registrationDate))
                 cmd.Parameters.AddWithValue("@email", artisticEmail)
@@ -2269,6 +2407,18 @@ Module Program
                 cmd.Parameters.AddWithValue("@userid", userId)
                 newArtistId = CInt(cmd.ExecuteScalar())
             End Using
+
+            ' Guardar imagen y actualizar con la ruta si se proporciona
+            If image IsNot Nothing Then
+                Dim imagePath As String = SaveBase64Image(image, "artist", newArtistId)
+                If imagePath IsNot Nothing Then
+                    Using cmd = db.CreateCommand("UPDATE artistas SET imagen = @imagen WHERE idartista = @id")
+                        cmd.Parameters.AddWithValue("@imagen", imagePath)
+                        cmd.Parameters.AddWithValue("@id", newArtistId)
+                        cmd.ExecuteNonQuery()
+                    End Using
+                End If
+            End If
 
             jsonResponse = ConvertToJson(New Dictionary(Of String, Object) From {{"artistId", newArtistId}})
             statusCode = HttpStatusCode.OK
@@ -2555,8 +2705,7 @@ Module Program
                         While reader.Read()
                             schema("artistId") = action
                             schema("artisticName") = reader.GetString(0)
-                            Dim imagenBytes As Byte() = CType(reader("imagen"), Byte())
-                            schema("artisticImage") = Convert.ToBase64String(imagenBytes)
+                            schema("artisticImage") = GetImagePath(reader("imagen"))
                             schema("artisticBiography") = reader.GetString(2)
                             schema("registrationDate") = reader.GetDateTime(3).ToString("yyyy-MM-dd")
                             schema("artisticEmail") = If(reader.IsDBNull(4), Nothing, reader.GetString(4))
@@ -2626,6 +2775,16 @@ Module Program
 
             Dim artistId As Integer = Integer.Parse(action)
 
+            ' Obtener la ruta de la imagen antes de eliminar el registro
+            Dim imagePath As String = Nothing
+            Using cmd = db.CreateCommand("SELECT imagen FROM artistas WHERE idartista = @id")
+                cmd.Parameters.AddWithValue("@id", artistId)
+                Dim result As Object = cmd.ExecuteScalar()
+                If result IsNot Nothing AndAlso Not IsDBNull(result) Then
+                    imagePath = result.ToString()
+                End If
+            End Using
+
             ' Eliminar artista (las relaciones se eliminan en cascada)
             Using cmd = db.CreateCommand("DELETE FROM artistas WHERE idartista = @id")
                 cmd.Parameters.AddWithValue("@id", artistId)
@@ -2635,6 +2794,11 @@ Module Program
                     jsonResponse = GenerateErrorResponse("404", "Artista no encontrado")
                     statusCode = HttpStatusCode.NotFound
                 Else
+                    ' Eliminar archivo de imagen si existe
+                    If imagePath IsNot Nothing Then
+                        DeleteImageFile(imagePath)
+                    End If
+
                     jsonResponse = ""
                     statusCode = HttpStatusCode.OK
                 End If
@@ -2673,8 +2837,27 @@ Module Program
                     cmd.Parameters.AddWithValue("@nombre", artistData("artisticName").GetString())
                 End If
                 If artistData.ContainsKey("artisticImage") Then
-                    updates.Add("imagen = @imagen")
-                    cmd.Parameters.AddWithValue("@imagen", StringToBytes(artistData("artisticImage").GetString()))
+                    ' Obtener la ruta anterior para eliminar el archivo viejo
+                    Dim oldImagePath As String = Nothing
+                    Using cmdOld = db.CreateCommand("SELECT imagen FROM artistas WHERE idartista = @id")
+                        cmdOld.Parameters.AddWithValue("@id", artistId)
+                        Dim result As Object = cmdOld.ExecuteScalar()
+                        If result IsNot Nothing AndAlso Not IsDBNull(result) Then
+                            oldImagePath = result.ToString()
+                        End If
+                    End Using
+
+                    ' Guardar nueva imagen y obtener ruta
+                    Dim newImagePath As String = SaveBase64Image(artistData("artisticImage").GetString(), "artist", artistId)
+                    If newImagePath IsNot Nothing Then
+                        updates.Add("imagen = @imagen")
+                        cmd.Parameters.AddWithValue("@imagen", newImagePath)
+
+                        ' Eliminar archivo viejo si existe y es diferente
+                        If oldImagePath IsNot Nothing AndAlso oldImagePath <> newImagePath Then
+                            DeleteImageFile(oldImagePath)
+                        End If
+                    End If
                 End If
                 If artistData.ContainsKey("artisticBiography") Then
                     updates.Add("bio = @bio")
@@ -2741,7 +2924,7 @@ Module Program
     ' ==========================================================================
     ' FUNCIONES HELPER PARA CONVERSIÓN DE IMÁGENES
     ' ==========================================================================
-    
+
     ''' <summary>
     ''' Convierte una cadena a bytes. Soporta base64 puro o data URI completo.
     ''' Si la conversión base64 falla, convierte como texto UTF8.
@@ -2780,5 +2963,170 @@ Module Program
         End If
         Return "data:image/png;base64," & Convert.ToBase64String(bytes)
     End Function
+
+    ''' <summary>
+    ''' Guarda una imagen en base64 en la carpeta static y devuelve la ruta relativa.
+    ''' </summary>
+    ''' <param name="base64Image">Cadena de imagen en base64 (con o sin prefijo data:image)</param>
+    ''' <param name="subfolder">Subcarpeta dentro de static (songs, albums, merch, artists)</param>
+    ''' <param name="id">ID único del elemento para el nombre del archivo</param>
+    ''' <returns>Ruta relativa desde static (ej: /songs/123.png)</returns>
+    Function SaveBase64Image(base64Image As String, subfolder As String, id As Integer) As String
+        Try
+            ' Extraer la extensión del prefijo data:image
+            Dim extension As String = "png" ' Por defecto PNG
+            Dim base64Data As String = base64Image
+
+            If base64Image.StartsWith("data:image/") Then
+                Dim semicolonIndex As Integer = base64Image.IndexOf(";")
+                If semicolonIndex > 0 Then
+                    Dim mimeType As String = base64Image.Substring(11, semicolonIndex - 11) ' Después de "data:image/"
+                    extension = mimeType.ToLower()
+                End If
+
+                Dim commaIndex As Integer = base64Image.IndexOf(",")
+                If commaIndex > 0 Then
+                    base64Data = base64Image.Substring(commaIndex + 1)
+                End If
+            End If
+
+            ' Convertir base64 a bytes
+            Dim imageBytes As Byte() = Convert.FromBase64String(base64Data)
+
+            ' Crear ruta completa
+            Dim staticPath As String = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "static", subfolder)
+            If Not Directory.Exists(staticPath) Then
+                Directory.CreateDirectory(staticPath)
+            End If
+
+            Dim fileName As String = $"{id}.{extension}"
+            Dim fullPath As String = Path.Combine(staticPath, fileName)
+            Console.WriteLine($"Guardando imagen en: {fullPath}")
+
+            ' Guardar archivo
+            File.WriteAllBytes(fullPath, imageBytes)
+
+            ' Devolver ruta relativa (desde static)
+            Return $"/{subfolder}/{fileName}"
+
+        Catch ex As Exception
+            Console.WriteLine($"Error al guardar imagen: {ex.Message}")
+            Return Nothing
+        End Try
+    End Function
+
+    ''' <summary>
+    ''' Elimina un archivo de imagen de la carpeta static.
+    ''' </summary>
+    ''' <param name="relativePath">Ruta relativa desde static (ej: /songs/123.png)</param>
+    Sub DeleteImageFile(relativePath As String)
+        Try
+            If String.IsNullOrEmpty(relativePath) Then
+                Return
+            End If
+
+            ' Construir ruta completa
+            Dim staticPath As String = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "static")
+            Dim fullPath As String = Path.Combine(staticPath, relativePath.TrimStart("/"c))
+
+            If File.Exists(fullPath) Then
+                File.Delete(fullPath)
+                Console.WriteLine($"Imagen eliminada: {fullPath}")
+            End If
+
+        Catch ex As Exception
+            Console.WriteLine($"Error al eliminar imagen: {ex.Message}")
+        End Try
+    End Sub
+
+    ''' <summary>
+    ''' Obtiene la ruta de imagen almacenada en la base de datos.
+    ''' Si es NULL, vacío o string vacío, devuelve Nothing.
+    ''' </summary>
+    ''' <param name="imagePath">Ruta desde la base de datos</param>
+    ''' <returns>Ruta relativa o Nothing</returns>
+    Function GetImagePath(imagePath As Object) As String
+        If imagePath Is Nothing OrElse IsDBNull(imagePath) Then
+            Return Nothing
+        End If
+
+        Dim path As String = imagePath.ToString()
+        If String.IsNullOrEmpty(path) OrElse path.Trim() = "" OrElse path = "default.png" OrElse path.EndsWith("/default.png") Then
+            Return Nothing
+        End If
+
+        Return path
+    End Function
+
+    ''' <summary>
+    ''' Sirve archivos estáticos desde la carpeta static
+    ''' </summary>
+    Sub ServeStaticFile(request As HttpListenerRequest, response As HttpListenerResponse)
+        Try
+            ' Obtener la ruta relativa desde /static/...
+            Dim requestPath As String = request.Url.AbsolutePath
+
+            ' Construir ruta completa del archivo
+            Dim staticPath As String = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "static")
+            Dim filePath As String = Path.Combine(staticPath, requestPath.Replace("/static/", "").Replace("/", Path.DirectorySeparatorChar.ToString()))
+
+            ' Verificar que el archivo existe y está dentro de la carpeta static (seguridad)
+            Dim fullStaticPath As String = Path.GetFullPath(staticPath)
+            Dim fullFilePath As String = Path.GetFullPath(filePath)
+
+            If Not fullFilePath.StartsWith(fullStaticPath) Then
+                ' Intento de acceso fuera de la carpeta static
+                response.StatusCode = HttpStatusCode.Forbidden
+                response.Close()
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Acceso denegado: intento de acceder fuera de static")
+                Return
+            End If
+
+            If Not File.Exists(fullFilePath) Then
+                ' Archivo no encontrado
+                response.StatusCode = HttpStatusCode.NotFound
+                Dim errorBytes As Byte() = Encoding.UTF8.GetBytes("File not found")
+                response.ContentLength64 = errorBytes.Length
+                response.OutputStream.Write(errorBytes, 0, errorBytes.Length)
+                response.Close()
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Archivo no encontrado: {requestPath}")
+                Return
+            End If
+
+            ' Determinar Content-Type basado en la extensión
+            Dim extension As String = Path.GetExtension(fullFilePath).ToLower()
+            Dim contentType As String = "application/octet-stream"
+
+            Select Case extension
+                Case ".png"
+                    contentType = "image/png"
+                Case ".jpg", ".jpeg"
+                    contentType = "image/jpeg"
+                Case ".gif"
+                    contentType = "image/gif"
+                Case ".svg"
+                    contentType = "image/svg+xml"
+                Case ".webp"
+                    contentType = "image/webp"
+                Case ".ico"
+                    contentType = "image/x-icon"
+            End Select
+
+            ' Leer y enviar el archivo
+            Dim fileBytes As Byte() = File.ReadAllBytes(fullFilePath)
+            response.ContentType = contentType
+            response.ContentLength64 = fileBytes.Length
+            response.StatusCode = HttpStatusCode.OK
+            response.OutputStream.Write(fileBytes, 0, fileBytes.Length)
+            response.Close()
+
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Archivo servido: {requestPath} ({fileBytes.Length} bytes)")
+
+        Catch ex As Exception
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Error al servir archivo estático: {ex.Message}")
+            response.StatusCode = HttpStatusCode.InternalServerError
+            response.Close()
+        End Try
+    End Sub
 
 End Module
