@@ -23,7 +23,7 @@ from typing import Dict, Any, Optional
 # CONFIGURACIÓN DEL SERVIDOR Y AUTENTICACIÓN
 # ============================================================================
 BASE_URL = "http://localhost:8081"
-AUTH_TOKEN = "15a0b7ab217fa2b366c1390a63aee560fdf7df95c16f2e29cb71d9a012dcb6ad38349d54d603cb0bf23a447125f1542be4aceeafa7b24d98056f9808373c0c85"  # ⚠️ REEMPLAZAR con un token válido de autenticación
+AUTH_TOKEN = "ddc2124b7896adcfba7e1467293f303ba963a1262ef413f796115a6166309507c50e502a15f9d2fca466ad67088aa2894ae5692cdf3180d13f4af1c23c2c5689"  # ⚠️ REEMPLAZAR con un token válido de autenticación
 
 # Colores para output en consola
 class Colors:
