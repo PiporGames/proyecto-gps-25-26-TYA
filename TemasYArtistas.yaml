@@ -20,6 +20,8 @@ tags:
     description: Access to artists information
   - name: genres
     description: Access to music genres information
+  - name: static
+    description: Access to static files (images)
     
 paths:
   /song/list:
@@ -1115,6 +1117,65 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  
+  /static/{type}/{filename}:
+    get:
+      tags:
+        - static
+      summary: Serve static files (images)
+      description: |-
+        Serves static image files stored in the server's file system.
+        Images are stored in /static/{type}/ folders where type can be: song, album, merch, artist.
+        This endpoint is used to retrieve images that were previously uploaded via the upload/update endpoints.
+        
+        **Security Note:** Only files within the static folder can be accessed. Attempts to access files outside this folder will return 403 Forbidden.
+      operationId: serveStaticFile
+      parameters:
+        - name: type
+          in: path
+          description: Type of resource (song, album, merch, artist)
+          required: true
+          schema:
+            type: string
+            enum: [song, album, merch, artist]
+          example: "song"
+        - name: filename
+          in: path
+          description: Name of the file including extension (e.g., 123.png)
+          required: true
+          schema:
+            type: string
+          example: "123.png"
+      responses:
+        '200':
+          description: Successful operation - returns the image file
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/gif:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+            image/svg+xml:
+              schema:
+                type: string
+                format: binary
+        '403':
+          description: Forbidden - attempt to access outside static folder
+        '404':
+          description: File not found
+        default:
+          description: Unexpected error
 
 components:
   securitySchemes:
@@ -1195,8 +1256,11 @@ components:
           description: IDs of genres of the Song
         cover:
           type: string
-          description: base64 image of the Song cover
-          example: "data:image/png;base64,iVBORw0KGgoAAAAN..."
+          nullable: true
+          description: |-
+            Path to the song cover image (e.g., /song/123.png) or null if no custom image was provided.
+            When retrieving data, this field contains the relative path to access via /static endpoint.
+          example: "/song/123.png"
         price:
           type: number
           format: double
@@ -1255,8 +1319,11 @@ components:
           description: IDs of genres of the Song
         cover:
           type: string
-          description: Image file path for the Song cover
-          example: "/images/songs/california-girls-cover.jpg"
+          description: |-
+            Base64-encoded image for the Song cover. Supports formats: PNG, JPEG, GIF, WEBP.
+            Can include data URI prefix (data:image/png;base64,) or be pure base64 string.
+            The image will be stored in /static/song/ and a relative path will be saved in the database.
+          example: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
         price:
           type: number
           format: double
@@ -1332,8 +1399,11 @@ components:
           example: [1, 2, 3, 4, 5]
         cover:
           type: string
-          description: Image file path for the Album cover
-          example: "/images/albums/teenage-dream-cover.jpg"
+          nullable: true
+          description: |-
+            Path to the album cover image (e.g., /album/456.png) or null if no custom image was provided.
+            When retrieving data, this field contains the relative path to access via /static endpoint.
+          example: "/album/456.png"
         price:
           type: number
           format: double
@@ -1371,8 +1441,11 @@ components:
           example: [1, 2, 3, 4, 5]
         cover:
           type: string
-          description: Image file path for the Album cover
-          example: "/images/albums/teenage-dream-cover.jpg"
+          description: |-
+            Base64-encoded image for the Album cover. Supports formats: PNG, JPEG, GIF, WEBP.
+            Can include data URI prefix (data:image/png;base64,) or be pure base64 string.
+            The image will be stored in /static/album/ and a relative path will be saved in the database.
+          example: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
         price:
           type: number
           format: double
@@ -1408,8 +1481,11 @@ components:
           example: contact@katyperry.com
         artisticImage:
           type: string
-          description: base64 image of the Artist profile
-          example: "data:image/png;base64,iVBORw0KGgoAAAAN..."
+          nullable: true
+          description: |-
+            Path to the artist profile image (e.g., /artist/321.png) or null if no custom image was provided.
+            When retrieving data, this field contains the relative path to access via /static endpoint.
+          example: "/artist/321.png"
         socialMediaUrl:
           type: string
           format: uri
@@ -1463,8 +1539,11 @@ components:
           example: contact@katyperry.com
         artisticImage:
           type: string
-          description: Image file path for the Artist profile
-          example: "/images/artists/katy-perry-profile.jpg"
+          description: |-
+            Base64-encoded image for the Artist profile. Supports formats: PNG, JPEG, GIF, WEBP.
+            Can include data URI prefix (data:image/png;base64,) or be pure base64 string.
+            The image will be stored in /static/artist/ and a relative path will be saved in the database.
+          example: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
         socialMediaUrl:
           type: string
           format: uri
@@ -1514,8 +1593,11 @@ components:
           example: 29.99
         cover:
           type: string
-          description: Image file path for the Merchandising item
-          example: "/images/merch/teenage-dream-tshirt.jpg"
+          nullable: true
+          description: |-
+            Path to the merchandising image (e.g., /merch/789.png) or null if no custom image was provided.
+            When retrieving data, this field contains the relative path to access via /static endpoint.
+          example: "/merch/789.png"
 
     RegisterMerchandising:
       type: object
@@ -1547,8 +1629,11 @@ components:
           example: 29.99
         cover:
           type: string
-          description: Image file path for the Merchandising item
-          example: "/images/merch/teenage-dream-tshirt.jpg"
+          description: |-
+            Base64-encoded image for the Merchandising item. Supports formats: PNG, JPEG, GIF, WEBP.
+            Can include data URI prefix (data:image/png;base64,) or be pure base64 string.
+            The image will be stored in /static/merch/ and a relative path will be saved in the database.
+          example: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
       required:
         - title
         - price

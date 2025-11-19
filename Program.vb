@@ -17,7 +17,7 @@ Module Program
     Dim host_port As Integer = 8081
     Dim connectionString = "Host=pgnweb.ddns.net;Username=tya_admin;Password=12345;Database=tya"
     Dim db As NpgsqlDataSource = Nothing
-    Dim ip_auth As String = "10.1.1.4:8080" ' IP del servicio de autenticación
+    Dim ip_auth As String = "localhost:8080" ' IP del servicio de autenticación
     '==========================================================================
 
     Sub Main(args As String())
@@ -327,8 +327,8 @@ Module Program
                     Dim responseBody As String = Await authResponse.Content.ReadAsStringAsync()
                     Dim userData = JsonSerializer.Deserialize(Of Dictionary(Of String, JsonElement))(responseBody)
                     ' Extraer solo el userId
-                    If userData.ContainsKey("idUsuario") Then
-                        Return userData("idUsuario").GetInt32()
+                    If userData.ContainsKey("userId") Then
+                        Return userData("userId").GetInt32()
                     End If
 
                     Return Nothing
