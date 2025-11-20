@@ -898,6 +898,7 @@ paths:
       tags:
         - artist
       summary: Updates an artist in the database with form data.
+      description: Updates artist properties. When updating the userId field, the system validates that the new user doesn't already have another artist profile associated. If they do, the operation fails with a 409 Conflict error.
       operationId: updateArtist
       parameters:
         - name: artistId
@@ -917,6 +918,8 @@ paths:
           description: Successful operation
         '400':
           description: Invalid input
+        '409':
+          description: Conflict - The specified user already has another artist associated. Cannot reassign userId to a user that already has an artist profile.
         '422':
           description: Validation exception
         default:
@@ -961,6 +964,7 @@ paths:
       tags:
         - artist
       summary: Add a new artist to the database
+      description: Creates a new artist profile. Each user can only have one artist profile associated. If the authenticated user already has an artist profile, this operation will fail with a 409 Conflict error.
       operationId: addArtist
       requestBody:
         content:
@@ -982,6 +986,10 @@ paths:
                     example: 321
         '400':
           description: Invalid input
+        '403':
+          description: Forbidden - The authenticated user does not have an associated artist profile
+        '409':
+          description: Conflict - The authenticated user already has an artist associated. Only one artist profile per user is allowed.
         '422':
           description: Validation exception
         default:

@@ -22,8 +22,8 @@ from typing import Dict, Any, Optional
 # ============================================================================
 # CONFIGURACIÓN DEL SERVIDOR Y AUTENTICACIÓN
 # ============================================================================
-BASE_URL = "http://10.1.1.4:8081"
-AUTH_TOKEN = "b6999595fe1f50b6fec7559cb1799b7418a006520a89c8ded9017c0b6ab9bc773b0298a9241517d5dd75d3f5f3813fc4635ac3a5bfeb164a10b0f0f86a3c65e6"  # ⚠️ REEMPLAZAR con un token válido de autenticación
+BASE_URL = "http://localhost:8081"
+AUTH_TOKEN = "7f1e62d553ae3f1a4ee6c3978dcbdd6038d3632b1482a0449b1d279f2b2f51ae0f91ab5116ab7175ac15e5af8cea985b295d24048c9328341d0c8972995b97ac"  # ⚠️ REEMPLAZAR con un token válido de autenticación
 
 # Colores para output en consola
 class Colors:
