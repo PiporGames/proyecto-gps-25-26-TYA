@@ -15,7 +15,7 @@ Module Program
     ' PARÁMETROS DE CONFIGURACIÓN
     Dim host_ip As String = "+"
     Dim host_port As Integer = 8081
-    Dim connectionString = "Host=pgnweb.ddns.net;Username=tya_admin;Password=12345;Database=tya"
+    Dim connectionString = "Host=10.1.1.1;Username=tya_admin;Password=12345;Database=tya"
     Dim db As NpgsqlDataSource = Nothing
     Dim ip_auth As String = "localhost:8080" ' IP del servicio de autenticación
     '==========================================================================
