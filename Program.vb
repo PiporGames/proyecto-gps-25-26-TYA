@@ -2346,7 +2346,7 @@ Module Program
             schema("owner_albums") = GetIdList("SELECT idalbum FROM autoresalbumes WHERE idartista = @id AND ft = false", "@id", artistId)
 
             ' Obtener merchandising asociado al artista
-            schema("owner_merch") = GetIdList("SELECT idmerch FROM AutoresMerch WHERE idartista = @id", "@id", artistId)
+            schema("owner_merch") = GetIdList("SELECT idmerch FROM AutoresMerch WHERE idartista = @id AND ft = false", "@id", artistId)
 
             Return schema
 
