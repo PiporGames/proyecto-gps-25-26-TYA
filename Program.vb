@@ -13,11 +13,11 @@ Module Program
     ' Creado por: José Manuel de Torres Dominguez
     '==========================================================================
     ' PARÁMETROS DE CONFIGURACIÓN
-    Dim host_ip As String = "localhost"
-    Dim host_port As Integer = 8081
-    Dim connectionString = "Host=10.1.1.1;Username=tya_admin;Password=12345;Database=tya"
+    Dim host_ip As String = System.Environment.GetEnvironmentVariable("HOST_TYA_IP")
+    Dim host_port As Integer = System.Environment.GetEnvironmentVariable("HOST_TYA_PORT")
+    Dim connectionString = "Host=" & System.Environment.GetEnvironmentVariable("DB_HOST").ToString & ":" & System.Environment.GetEnvironmentVariable("DB_PORT").ToString & ";Username=" & System.Environment.GetEnvironmentVariable("DB_USER").ToString & ";Password=" & System.Environment.GetEnvironmentVariable("DB_PWD").ToString & ";Database=" & System.Environment.GetEnvironmentVariable("DB_NAME").ToString
     Dim db As NpgsqlDataSource = Nothing
-    Dim ip_auth As String = "localhost:8080" ' IP del servicio de autenticación
+    Dim ip_auth As String = System.Environment.GetEnvironmentVariable("HOST_SYU").ToString ' IP del servicio de autenticación
     '==========================================================================
 
     Sub Main(args As String())
